@@ -1,0 +1,28 @@
+From 7b6a344f45276f6e36e5c81d94a9d04ef6238766 Mon Sep 17 00:00:00 2001
+From: Tomasz Wlostowski <tomasz.wlostowski@cern.ch>
+Date: Thu, 26 Dec 2024 19:29:30 +0100
+Subject: [PATCH] router: provisional fix for crash when dragging footprints
+ with exactly overlapping pad anchors
+
+Fixes https://gitlab.com/kicad/code/kicad/issues/19382
+---
+ pcbnew/router/pns_node.cpp | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/pcbnew/router/pns_node.cpp b/pcbnew/router/pns_node.cpp
+index 286a37fc8..39f4be152 100644
+--- a/pcbnew/router/pns_node.cpp
++++ b/pcbnew/router/pns_node.cpp
+@@ -787,6 +787,9 @@ void NODE::removeArcIndex( ARC* aArc )
+ 
+ void NODE::rebuildJoint( const JOINT* aJoint, const ITEM* aItem )
+ {
++    if( !aJoint )
++        return;
++
+     // We have to split a single joint (associated with a via or a pad, binding together multiple
+     // layers) into multiple independent joints. As I'm a lazy bastard, I simply delete the
+     // via/solid and all its links and re-insert them.
+-- 
+2.43.0
+

@@ -1,0 +1,7 @@
+# 可変抵抗まわりの 2 本を外して引き直し、整える
+unroute R15.1
+unroute R16.1
+autoroute R15.1 RV1.1
+autoroute R16.1 RV1.3
+optimize R15.1
+check

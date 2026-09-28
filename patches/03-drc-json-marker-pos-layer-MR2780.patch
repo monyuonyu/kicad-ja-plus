@@ -1,0 +1,138 @@
+diff --git a/include/rc_json_schema.h b/include/rc_json_schema.h
+index 7745289..d9a67fb 100644
+--- a/include/rc_json_schema.h
++++ b/include/rc_json_schema.h
+@@ -22,6 +22,7 @@
+ 
+ #include <nlohmann/json.hpp>
+ #include <wx/string.h>
++#include <optional>
+ #include <vector>
+ 
+ /**
+@@ -54,6 +55,8 @@ struct VIOLATION
+     wxString                   description;
+     wxString                   severity;
+     std::vector<AFFECTED_ITEM> items;
++    std::optional<COORDINATE>  pos;     // KiCad MR !2780 から移植: エラー表示(マーカー)の位置
++    wxString                   layer;   // 同: マーカーの層
+     bool                       excluded;
+ };
+ 
+@@ -64,6 +67,12 @@ inline void to_json( nlohmann::json& aJson, const VIOLATION& aViolation )
+     aJson["severity"] = aViolation.severity;
+     aJson["items"] = aViolation.items;
+ 
++    if( aViolation.pos )
++        aJson["pos"] = *aViolation.pos;
++
++    if( !aViolation.layer.IsEmpty() )
++        aJson["layer"] = aViolation.layer;
++
+     if( aViolation.excluded )
+         aJson["excluded"] = aViolation.excluded;
+ }
+@@ -73,6 +82,17 @@ inline void from_json( const nlohmann::json& aJson, VIOLATION& aViolation )
+     aJson.at( "description" ).get_to( aViolation.description );
+     aJson.at( "severity" ).get_to( aViolation.severity );
+     aJson.at( "items" ).get_to( aViolation.items );
++
++    if( aJson.contains( "pos" ) )
++        aViolation.pos = aJson.at( "pos" ).get<COORDINATE>();
++    else
++        aViolation.pos.reset();
++
++    if( aJson.contains( "layer" ) )
++        aJson.at( "layer" ).get_to( aViolation.layer );
++    else
++        aViolation.layer.clear();
++
+     aJson.at( "excluded" ).get_to( aViolation.excluded );
+ }
+ 
+diff --git a/pcbnew/drc/drc_report.cpp b/pcbnew/drc/drc_report.cpp
+index 9326918..29f4afb 100644
+--- a/pcbnew/drc/drc_report.cpp
++++ b/pcbnew/drc/drc_report.cpp
+@@ -28,6 +28,7 @@
+ #include <macros.h>
+ #include <nlohmann/json.hpp>
+ #include <rc_json_schema.h>
++#include <pcb_marker.h>
+ 
+ 
+ DRC_REPORT::DRC_REPORT( BOARD* aBoard, EDA_UNITS aReportUnits,
+@@ -129,6 +130,23 @@ bool DRC_REPORT::WriteJsonReport( const wxString& aFullFileName )
+     reportHead.kicad_version = GetMajorMinorPatchVersion();
+     reportHead.coordinate_units = EDA_UNIT_UTILS::GetLabel( m_reportUnits );
+ 
++    // KiCad MR !2780 から移植: 各エラーにマーカーの位置と層を付ける
++    auto setMarkerLocation = [&]( const std::shared_ptr<RC_ITEM>& aItem, RC_JSON::VIOLATION& aViolation )
++    {
++        const PCB_MARKER* marker = dynamic_cast<const PCB_MARKER*>( aItem->GetParent() );
++
++        if( !marker )
++            return;
++
++        RC_JSON::COORDINATE pos;
++        pos.x = EDA_UNIT_UTILS::UI::ToUserUnit( pcbIUScale, m_reportUnits, marker->GetPosition().x );
++        pos.y = EDA_UNIT_UTILS::UI::ToUserUnit( pcbIUScale, m_reportUnits, marker->GetPosition().y );
++        aViolation.pos = pos;
++
++        if( IsValidLayer( marker->GetLayer() ) )
++            aViolation.layer = m_board->GetLayerName( marker->GetLayer() );
++    };
++
+     for( int i = 0; i < m_markersProvider->GetCount(); ++i )
+     {
+         const std::shared_ptr<RC_ITEM>& item = m_markersProvider->GetItem( i );
+@@ -139,6 +157,7 @@ bool DRC_REPORT::WriteJsonReport( const wxString& aFullFileName )
+ 
+         RC_JSON::VIOLATION violation;
+         item->GetJsonViolation( violation, &unitsProvider, severity, itemMap );
++        setMarkerLocation( item, violation );
+ 
+         reportHead.violations.push_back( violation );
+     }
+@@ -150,6 +169,7 @@ bool DRC_REPORT::WriteJsonReport( const wxString& aFullFileName )
+ 
+         RC_JSON::VIOLATION violation;
+         item->GetJsonViolation( violation, &unitsProvider, severity, itemMap );
++        setMarkerLocation( item, violation );
+ 
+         reportHead.unconnected_items.push_back( violation );
+     }
+@@ -162,6 +182,7 @@ bool DRC_REPORT::WriteJsonReport( const wxString& aFullFileName )
+ 
+         RC_JSON::VIOLATION violation;
+         item->GetJsonViolation( violation, &unitsProvider, severity, itemMap );
++        setMarkerLocation( item, violation );
+ 
+         reportHead.schematic_parity.push_back( violation );
+     }
+diff --git a/resources/schemas/drc.v1.json b/resources/schemas/drc.v1.json
+index 0894e22..3ee1189 100644
+--- a/resources/schemas/drc.v1.json
++++ b/resources/schemas/drc.v1.json
+@@ -59,7 +59,7 @@
+     "violations",
+     "unconnected_items",
+     "schematic_parity",
+-    "coordinate_units",
++    "coordinate_units"
+   ],
+   "definitions": {
+     "Violation": {
+@@ -83,6 +83,12 @@
+             "$ref": "#/definitions/AffectedItem"
+           }
+         },
++        "pos": {
++          "$ref": "#/definitions/Coordinate"
++        },
++        "layer": {
++          "type": "string"
++        },
+         "excluded": {
+           "type": "boolean",
+           "default": false

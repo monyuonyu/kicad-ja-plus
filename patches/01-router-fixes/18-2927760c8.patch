@@ -1,0 +1,64 @@
+From 2927760c8ff727e808f7e419f64f283acee07f67 Mon Sep 17 00:00:00 2001
+From: Seth Hillbrand <seth@kipro-pcb.com>
+Date: Tue, 21 Jul 2026 07:02:29 -0700
+Subject: [PATCH] router: fix dangling anchor item in attempt-finish path
+
+NearestUnconnectedAnchorPoint adds the in-progress track to a temporary
+branch node to probe connectivity. When the track end joint's only links
+were that temporary track, it returned jt->LinkList()[0], a pointer into
+the branch that is freed on return. Finish() (F key) then dereferenced the
+dangling item in Move()/FixRoute(), crashing rarely with an access
+violation. Return a link that lives in the persistent world, and let
+ConnectedJoints() walk arcs so the fallback subtracts arc-containing
+tracks in full rather than leaving branch primitives selectable.
+
+Fixes https://gitlab.com/kicad/code/kicad/-/issues/24985
+---
+ pcbnew/router/pns_topology.cpp | 19 +++++++++++++++++--
+ 1 file changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/pcbnew/router/pns_topology.cpp b/pcbnew/router/pns_topology.cpp
+index 1c66d67a5..77bd4ad48 100644
+--- a/pcbnew/router/pns_topology.cpp
++++ b/pcbnew/router/pns_topology.cpp
+@@ -85,7 +85,7 @@ const TOPOLOGY::JOINT_SET TOPOLOGY::ConnectedJoints( const JOINT* aStart )
+ 
+         for( ITEM* item : current->LinkList() )
+         {
+-            if( item->OfKind( ITEM::SEGMENT_T ) )
++            if( item->OfKind( ITEM::SEGMENT_T | ITEM::ARC_T ) )
+             {
+                 const JOINT* a = m_world->FindJoint( item->Anchor( 0 ), item );;
+                 const JOINT* b = m_world->FindJoint( item->Anchor( 1 ), item );;
+@@ -123,12 +123,27 @@ bool TOPOLOGY::NearestUnconnectedAnchorPoint( const LINE* aTrack, VECTOR2I& aPoi
+     if( !jt || m_world->GetRuleResolver()->NetCode( jt->Net() ) <= 0 )
+        return false;
+ 
++    ITEM* connected = nullptr;
++
+     if( ( !track.EndsWithVia() && jt->LinkCount() >= 2 )
+             || ( track.EndsWithVia() && jt->LinkCount() >= 3 ) ) // we got something connected
++    {
++        // tmpNode's own track is freed on return, skip it to avoid a dangling anchor item
++        for( ITEM* link : jt->LinkList() )
++        {
++            if( !link->BelongsTo( tmpNode.get() ) )
++            {
++                connected = link;
++                break;
++            }
++        }
++    }
++
++    if( connected )
+     {
+         end = jt->Pos();
+         aLayers = jt->Layers();
+-        aItem = jt->LinkList()[0];
++        aItem = connected;
+     }
+     else
+     {
+-- 
+2.43.0
+

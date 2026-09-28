@@ -1,0 +1,35 @@
+From e4ef6429407844976efbae006292fccf80463424 Mon Sep 17 00:00:00 2001
+From: Tomasz Wlostowski <tomasz.wlostowski@cern.ch>
+Date: Sat, 2 Nov 2024 18:30:29 +0100
+Subject: [PATCH] router: NODE::FindJoint() should also compare the matching
+ joint's net/position. Another 'senior' bug in the P&S
+
+---
+ pcbnew/router/pns_node.cpp | 7 ++-----
+ 1 file changed, 2 insertions(+), 5 deletions(-)
+
+diff --git a/pcbnew/router/pns_node.cpp b/pcbnew/router/pns_node.cpp
+index 2e32b3f7d..eed2cb847 100644
+--- a/pcbnew/router/pns_node.cpp
++++ b/pcbnew/router/pns_node.cpp
+@@ -1252,15 +1252,12 @@ const JOINT* NODE::FindJoint( const VECTOR2I& aPos, int aLayer, NET_HANDLE aNet
+         f = m_root->m_joints.find( tag );    // m_root->FindJoint(aPos, aLayer, aNet);
+     }
+ 
+-    if( f == end )
+-        return nullptr;
+-
+     while( f != end )
+     {
+-        if( f->second.Layers().Overlaps( aLayer ) )
++        if( f->second.Pos() == aPos && f->second.Net() == aNet && f->second.Layers().Overlaps( aLayer ) )
+             return &f->second;
+ 
+-        ++f;
++        f++;
+     }
+ 
+     return nullptr;
+-- 
+2.43.0
+

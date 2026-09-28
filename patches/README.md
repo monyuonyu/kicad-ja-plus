@@ -1,0 +1,35 @@
+# KiCad 8.0.9 ローカル修正パッチ
+
+ソース: ~/src/kicad-8.0.9（GitHub 公式ミラーの 8.0.9 タグ）／ビルド: $KICAD_LOCAL_BUILD
+ファイル形式は 8.0 のまま（KiCad 8 と互換）。取り込むたびに ~/src/route-test/regress.sh と
+kicad-cli-local の DRC/ERC をシステム版と突き合わせて確認する。
+
+| 番号 | 内容 | 出どころ | 確認 |
+|---|---|---|---|
+| 00 | kicad_route（画面なし配線コマンド）＋ SWIG の thisown 参照数バグ修正 | 独自 | 回帰試験・valgrind |
+| 01 | ルーター不具合修正 19 件（8.0.9 向けに 3 件を調整） | master の 4403c9b62 6078bc52e fd502efff 663afac3d a6e111ec0 18c17111b e4ef64294 55d598843 7b6a344f4 bf64e7418 bfb3875a6 078703111 78fc95fd6 04b9fc76d 0256ccb6a f745f61d0 3b1c8e7ba 2927760c8 42cc8baa6 | 回帰試験で結果同一 |
+| 02 | pcb drc --refill-zones / --save-board | KiCad 10 | 保存結果が元とバイト一致 |
+| 03 | DRC の JSON に marker の位置と層 | MR !2780 | JSON 出力を確認 |
+| 04 | 部品を動かすとき、つながった線を迂回させて引き直す（C++17 と 8.0.9 の WALKAROUND::Route に合わせて調整） | MR !2188 | 回帰試験で結果同一。174 通りの移動の比較で、部品を右 1mm が「不可」→「可」（DRC 違反なし） |
+| 05 | `kicad-cli pcb export stats`（基板の統計。テキスト/JSON） | KiCad 10（f827982ca の版を移植。PRESSFIT 行は除外、ビア種別は BLIND_BURIED に統合、子要素の走査を明示化） | 部品・パッド・ビア・穴径ごとの数をシステムの pcbnew と突き合わせて一致 |
+| 06 | `kicad-cli pcb render`（画面なしの 3D レイトレース画像。PNG/JPEG、視点・回転・ズーム・高画質・床と影） | KiCad 9（f6f0b9a66 の job/CLI）＋ master a9ce9da55（`--rotate -45,0,45` の前処理） | 試験用の基板で上面・斜め・底面を描画。3D モデル表示には s3d_plugin_vrml/oce/idf のビルドが必要 |
+| 07 | kicad-route の使い勝手: help / info / check(その場で DRC、未配線と違反を分けて表示) / silk / 標準入力 / .kicad_pro の自動コピー / 指示書(--instructions、Markdown) / 部品を動かしたら部品番号の文字を自動で逃がし、押し出された周りの文字も逃がす（移動前からの重なりには触らない） | 独自（ユーザーの提案: シルクも押しのけ配線のように） | 部品移動の通し試験で DRC が移動前と同一、3D で文字が見えることを確認 |
+| 08 | `kicad-gerber`（info / diff / dirdiff）。差分画像は 灰=共通・赤=消えた・緑=増えた・青枠と番号=差のある場所、場所の座標一覧つき。`kicad-local fabdiff`（2 つの基板の製造データを層ごとに比較）と `renderdiff`（3D 画像の差分） | KiCad 11 の gerber_diff.cpp / gerber_to_polyset.cpp（4852b8485 以降）を移植。PNG は 8.0.9 に PNG プロッタが無いため Cairo で自前描画。gerbview の job の仕組みは移植していない | 同じ基板の 2 つの版の比較で、全層の差がすべて意図した変更で説明できることを確認。副産物として出力設定の穴の印(drillshape 1)を発見 |
+| (00内) | kicad_route の optimize 命令 | KiCad 11 の Optimize Route (654f0f473) | DRC 違反なし |
+
+8.0.9 向けの調整:
+- 663afac3d: PNS_LAYER_RANGE（9 で導入）→ LAYER_RANGE
+- 04b9fc76d: std::set::contains（C++20）→ count()
+- 4403c9b62: 8.0.9 に無いメンバ m_lastFixNode の初期化は除外
+- bfb3875a6: ルーター部は BOX2 の改名だけで 8.0.9 では同等（ClosestPointTo のまま）
+- 0256ccb6a: NODE::AssembleLine / followLine に aAllowSegmentSizeMismatch を移植（master と同じ判定）
+
+見送り: 001f22914 と d1191971d（8.0.9 には前提の制約・不具合が無い）
+
+06 の移植方針: 9 ではレイトレーサを base/GL/RAM の 3 クラスに分割したが、その前提に RGBA 背景などの改修が
+連鎖しているため、8.0.9 の RENDER_3D_RAYTRACE に HeadlessPrepare/HeadlessRender を足すだけにした（画面側は無変更）。
+視点切り替え（CAMERA::ViewCommand_T1）は共通ライブラリを変えないよう job 側に置いた。背景の透過は未対応（警告を出して不透明で描く）。
+
+## 入口
+
+`kicad-local help`（~/.local/bin。控えは bin/）。drc / erc / render / stats / route / cli / python / patches / rebuild / test。

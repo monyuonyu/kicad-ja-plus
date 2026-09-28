@@ -1,0 +1,26 @@
+From 18c17111bcca24d21a705d3519cfb09b12ae8469 Mon Sep 17 00:00:00 2001
+From: Tomasz Wlostowski <tomasz.wlostowski@cern.ch>
+Date: Sun, 27 Oct 2024 23:50:17 +0100
+Subject: [PATCH] router: prevent bogus collision detection between an ITEM and
+ a HOLE of both the same net
+
+---
+ pcbnew/router/pns_item.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/pcbnew/router/pns_item.cpp b/pcbnew/router/pns_item.cpp
+index 1da3f42ae..446d01f71 100644
+--- a/pcbnew/router/pns_item.cpp
++++ b/pcbnew/router/pns_item.cpp
+@@ -130,7 +130,7 @@ bool ITEM::collideSimple( const ITEM* aHead, const NODE* aNode,
+     // And a special case for the "head" via's hole.
+     if( holeH && shouldWeConsiderHoleCollisions( this, holeH ) )
+     {
+-        if( collideSimple( holeH, aNode, aCtx ) )
++        if( Net() != holeH->Net() && collideSimple( holeH, aNode, aCtx ) )
+             collisionsFound = true;
+     }
+ 
+-- 
+2.43.0
+

@@ -1,0 +1,27 @@
+From 663afac3df63cb13b7d4418707aa481456bd3468 Mon Sep 17 00:00:00 2001
+From: Tomasz Wlostowski <tomasz.wlostowski@cern.ch>
+Date: Thu, 24 Oct 2024 23:42:04 +0200
+Subject: [PATCH] router: make sure empty (unlinked) JOINTs have also empty
+ layer range
+
+Due to the architecture of the NODE storage (overrides), JOINTs that don't have any items attached are still kept in the child nodes, but with empty link list. So has to be the layer range, otherwise adding new items to a child node might result with JOINTs having mismatched layers vs items.
+---
+ pcbnew/router/pns_joint.h | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/pcbnew/router/pns_joint.h b/pcbnew/router/pns_joint.h
+index e18127808..f4f56d699 100644
+--- a/pcbnew/router/pns_joint.h
++++ b/pcbnew/router/pns_joint.h
+@@ -225,6 +225,8 @@ public:
+     bool Unlink( ITEM* aItem )
+     {
+         m_linkedItems.Erase( aItem );
++        if( m_linkedItems.Size() == 0 )
++            m_layers = PNS_LAYER_RANGE( -1 );
+         return m_linkedItems.Size() == 0;
+     }
+ 
+-- 
+2.43.0
+

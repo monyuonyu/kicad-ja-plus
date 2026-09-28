@@ -1,0 +1,47 @@
+From f745f61d06764ce1fb32c633df739d87a246b354 Mon Sep 17 00:00:00 2001
+From: Seth Hillbrand <seth@kipro-pcb.com>
+Date: Sat, 27 Dec 2025 07:27:49 -0800
+Subject: [PATCH] Don't remove locked segments
+
+When removing redundant tracks, check to see if the segment is locked
+before removing it.  If it is, skip the locked track(s)
+
+Fixes https://gitlab.com/kicad/code/kicad/-/issues/22387
+---
+ pcbnew/router/pns_line_placer.cpp | 18 ++++++++++++++++--
+ 1 file changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/pcbnew/router/pns_line_placer.cpp b/pcbnew/router/pns_line_placer.cpp
+index c810744aa..774421e07 100644
+--- a/pcbnew/router/pns_line_placer.cpp
++++ b/pcbnew/router/pns_line_placer.cpp
+@@ -1850,10 +1850,24 @@ void LINE_PLACER::removeLoops( NODE* aNode, LINE& aLatest )
+ 
+             if( !( line.ContainsLink( seg ) ) && line.SegmentCount() )
+             {
++                // Don't remove locked tracks
++                bool hasLockedSegment = false;
+                 for( LINKED_ITEM* ss : line.Links() )
+-                    toErase.insert( ss );
++                {
++                    if( ss->IsLocked() )
++                    {
++                        hasLockedSegment = true;
++                        break;
++                    }
++                }
+ 
+-                removedCount++;
++                if( !hasLockedSegment )
++                {
++                    for( LINKED_ITEM* ss : line.Links() )
++                        toErase.insert( ss );
++
++                    removedCount++;
++                }
+             }
+         }
+ 
+-- 
+2.43.0
+

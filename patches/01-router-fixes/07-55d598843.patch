@@ -1,0 +1,27 @@
+From 55d598843068307d019723ae83a371b7b6cb7b9c Mon Sep 17 00:00:00 2001
+From: Tomasz Wlostowski <tomasz.wlostowski@cern.ch>
+Date: Tue, 5 Nov 2024 15:44:40 +0100
+Subject: [PATCH] router: fix rare assertion when adding a LINE to a NODE with
+ duplicate segments
+
+---
+ pcbnew/router/pns_node.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/pcbnew/router/pns_node.cpp b/pcbnew/router/pns_node.cpp
+index c2ad76f62..6ca8c6525 100644
+--- a/pcbnew/router/pns_node.cpp
++++ b/pcbnew/router/pns_node.cpp
+@@ -637,7 +637,8 @@ void NODE::Add( LINE& aLine, bool aAllowRedundant )
+                                                                    aLine.Net() ) ) )
+             {
+                 // another line could be referencing this segment too :(
+-                aLine.Link( rseg );
++                if( !aLine.ContainsLink( rseg ) )
++                    aLine.Link( rseg );
+             }
+             else
+             {
+-- 
+2.43.0
+

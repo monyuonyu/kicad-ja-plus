@@ -1,0 +1,3 @@
+base commit: 9c4f534cf1a8fa5b2f3e7d4e1804fad681de921a
+describe: 8.0.9
+upstream: https://github.com/KiCad/kicad-source-mirror

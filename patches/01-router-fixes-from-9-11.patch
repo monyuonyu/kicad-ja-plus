@@ -1,0 +1,495 @@
+diff --git a/pcbnew/router/pns_item.cpp b/pcbnew/router/pns_item.cpp
+index 486739f..df53245 100644
+--- a/pcbnew/router/pns_item.cpp
++++ b/pcbnew/router/pns_item.cpp
+@@ -130,7 +130,7 @@ bool ITEM::collideSimple( const ITEM* aHead, const NODE* aNode,
+     // And a special case for the "head" via's hole.
+     if( holeH && shouldWeConsiderHoleCollisions( this, holeH ) )
+     {
+-        if( collideSimple( holeH, aNode, aCtx ) )
++        if( Net() != holeH->Net() && collideSimple( holeH, aNode, aCtx ) )
+             collisionsFound = true;
+     }
+ 
+@@ -170,7 +170,8 @@ bool ITEM::collideSimple( const ITEM* aHead, const NODE* aNode,
+         // a pad associated with a "free" pin (NIC) doesn't have a net until it has been used
+         clearance = -1;
+     }
+-    else if( aNode->GetRuleResolver()->IsKeepout( this, aHead, &enforce ) )
++    else if( aNode->GetRuleResolver()->IsKeepout( this, aHead, &enforce )
++             || aNode->GetRuleResolver()->IsKeepout( aHead, this, &enforce ) )
+     {
+         if( enforce )
+             clearance = 0;    // keepouts are exact boundary; no clearance
+diff --git a/pcbnew/router/pns_joint.h b/pcbnew/router/pns_joint.h
+index a4afaa9..43161aa 100644
+--- a/pcbnew/router/pns_joint.h
++++ b/pcbnew/router/pns_joint.h
+@@ -219,6 +219,8 @@ public:
+     bool Unlink( ITEM* aItem )
+     {
+         m_linkedItems.Erase( aItem );
++        if( m_linkedItems.Size() == 0 )
++            m_layers = LAYER_RANGE( -1 );  // 8.0: PNS_LAYER_RANGE は 9 で導入
+         return m_linkedItems.Size() == 0;
+     }
+ 
+diff --git a/pcbnew/router/pns_kicad_iface.cpp b/pcbnew/router/pns_kicad_iface.cpp
+index 5bb31e2..8e8f46e 100644
+--- a/pcbnew/router/pns_kicad_iface.cpp
++++ b/pcbnew/router/pns_kicad_iface.cpp
+@@ -1107,14 +1107,13 @@ PNS_KICAD_IFACE::PNS_KICAD_IFACE()
+ 
+ PNS_KICAD_IFACE_BASE::~PNS_KICAD_IFACE_BASE()
+ {
++    delete m_ruleResolver;
++    delete m_debugDecorator;
+ }
+ 
+ 
+ PNS_KICAD_IFACE::~PNS_KICAD_IFACE()
+ {
+-    delete m_ruleResolver;
+-    delete m_debugDecorator;
+-
+     if( m_previewItems )
+     {
+         m_previewItems->FreeItems();
+diff --git a/pcbnew/router/pns_kicad_iface.h b/pcbnew/router/pns_kicad_iface.h
+index 8fc7efe..0ee9195 100644
+--- a/pcbnew/router/pns_kicad_iface.h
++++ b/pcbnew/router/pns_kicad_iface.h
+@@ -52,7 +52,7 @@ class PNS_KICAD_IFACE_BASE : public PNS::ROUTER_IFACE
+ {
+ public:
+     PNS_KICAD_IFACE_BASE();
+-    ~PNS_KICAD_IFACE_BASE();
++    ~PNS_KICAD_IFACE_BASE() override;
+ 
+     void EraseView() override {};
+     void SetBoard( BOARD* aBoard );
+@@ -115,7 +115,7 @@ class PNS_KICAD_IFACE : public PNS_KICAD_IFACE_BASE
+ {
+ public:
+     PNS_KICAD_IFACE();
+-    ~PNS_KICAD_IFACE();
++    ~PNS_KICAD_IFACE() override;
+ 
+     virtual void SetHostTool( PCB_TOOL_BASE* aTool );
+ 
+diff --git a/pcbnew/router/pns_line_placer.cpp b/pcbnew/router/pns_line_placer.cpp
+index e50dd46..3fd253c 100644
+--- a/pcbnew/router/pns_line_placer.cpp
++++ b/pcbnew/router/pns_line_placer.cpp
+@@ -924,6 +924,12 @@ bool LINE_PLACER::rhShoveOnly( const VECTOR2I& aP, LINE& aNewHead, LINE& aNewTai
+         // Make sure the springback algorithm won't erase the NODE that owns m_endItem.
+         m_shove->SetSpringbackDoNotTouchNode( static_cast<const NODE*>( m_endItem->Owner() ) );
+     }
++    else
++    {
++        // No end item under the cursor anymore. Clear the DoNotTouchNode so springback
++        // can roll back past frames pinned by an earlier obstacle touch.
++        m_shove->SetSpringbackDoNotTouchNode( nullptr );
++    }
+ 
+     LINE newHead( walkSolids );
+ 
+@@ -1689,7 +1695,7 @@ bool LINE_PLACER::FixRoute( const VECTOR2I& aP, ITEM* aEndItem, bool aForceFinis
+         m_mouseTrailTracer.Clear();
+         m_mouseTrailTracer.SetTolerance( m_head.Width() );
+         m_mouseTrailTracer.AddTrailPoint( m_currentStart );
+-        m_mouseTrailTracer.SetDefaultDirections( lastSegDir, DIRECTION_45::UNDEFINED );
++        m_mouseTrailTracer.SetDefaultDirections( lastSegDir, lastSegDir );
+ 
+         m_placementCorrect = true;
+     }
+@@ -1807,10 +1813,24 @@ void LINE_PLACER::removeLoops( NODE* aNode, LINE& aLatest )
+ 
+             if( !( line.ContainsLink( seg ) ) && line.SegmentCount() )
+             {
++                // Don't remove locked tracks
++                bool hasLockedSegment = false;
+                 for( LINKED_ITEM* ss : line.Links() )
+-                    toErase.insert( ss );
++                {
++                    if( ss->IsLocked() )
++                    {
++                        hasLockedSegment = true;
++                        break;
++                    }
++                }
+ 
+-                removedCount++;
++                if( !hasLockedSegment )
++                {
++                    for( LINKED_ITEM* ss : line.Links() )
++                        toErase.insert( ss );
++
++                    removedCount++;
++                }
+             }
+         }
+ 
+@@ -1894,7 +1914,8 @@ void LINE_PLACER::simplifyNewLine( NODE* aNode, LINKED_ITEM* aLatest )
+ 
+     // And now we can proceed with assembling the final line and optimizing it.
+ 
+-    LINE l = aNode->AssembleLine( aLatest );
++    LINE l_orig = aNode->AssembleLine( aLatest );
++    LINE l( l_orig );
+ 
+     bool optimized = OPTIMIZER::Optimize( &l, OPTIMIZER::MERGE_COLINEAR, aNode );
+ 
+@@ -1904,9 +1925,10 @@ void LINE_PLACER::simplifyNewLine( NODE* aNode, LINKED_ITEM* aLatest )
+ 
+     if( optimized || simplified.PointCount() != l.PointCount() )
+     {
+-        aNode->Remove( l );
++        aNode->Remove( l_orig );
+         l.SetShape( simplified );
+         aNode->Add( l );
++        PNS_DBG( Dbg(), AddItem, &l, RED, 100000, wxT("simplified"));
+     }
+ }
+ 
+diff --git a/pcbnew/router/pns_node.cpp b/pcbnew/router/pns_node.cpp
+index 6f971e2..d40e1a8 100644
+--- a/pcbnew/router/pns_node.cpp
++++ b/pcbnew/router/pns_node.cpp
+@@ -636,7 +636,8 @@ void NODE::Add( LINE& aLine, bool aAllowRedundant )
+                                                                    aLine.Net() ) ) )
+             {
+                 // another line could be referencing this segment too :(
+-                aLine.Link( rseg );
++                if( !aLine.ContainsLink( rseg ) )
++                    aLine.Link( rseg );
+             }
+             else
+             {
+@@ -724,6 +725,8 @@ bool NODE::QueryEdgeExclusions( const VECTOR2I& aPos ) const
+ 
+ void NODE::doRemove( ITEM* aItem )
+ {
++    bool holeRemoved = false; // fixme: better logic, I don't like this
++
+     // case 1: removing an item that is stored in the root node from any branch:
+     // mark it as overridden, but do not remove
+     if( aItem->BelongsTo( m_root ) && !isRoot() )
+@@ -741,21 +744,26 @@ void NODE::doRemove( ITEM* aItem )
+         m_index->Remove( aItem );
+ 
+         if( aItem->HasHole() )
++        {
+             m_index->Remove( aItem->Hole() );
++            holeRemoved = true;
++        }
+     }
+ 
+     // the item belongs to this particular branch: un-reference it
+     if( aItem->BelongsTo( this ) )
+     {
+         aItem->SetOwner( nullptr );
+-
+         m_root->m_garbageItems.insert( aItem );
+-
+         HOLE *hole = aItem->Hole();
+ 
+         if( hole )
+         {
+-            m_index->Remove( hole ); // hole is not directly owned by NODE but by the parent SOLID/VIA.
++            if( ! holeRemoved )
++            {
++                m_index->Remove( hole ); // hole is not directly owned by NODE but by the parent SOLID/VIA.
++            }
++
+             hole->SetOwner( aItem );
+         }
+     }
+@@ -778,6 +786,9 @@ void NODE::removeArcIndex( ARC* aArc )
+ 
+ void NODE::rebuildJoint( const JOINT* aJoint, const ITEM* aItem )
+ {
++    if( !aJoint )
++        return;
++
+     // We have to split a single joint (associated with a via or a pad, binding together multiple
+     // layers) into multiple independent joints. As I'm a lazy bastard, I simply delete the
+     // via/solid and all its links and re-insert them.
+@@ -817,6 +828,8 @@ void NODE::rebuildJoint( const JOINT* aJoint, const ITEM* aItem )
+     {
+         if( link != aItem )
+             linkJoint( tag.pos, link->Layers(), net, link );
++        else
++            unlinkJoint( tag.pos, link->Layers(), net, link );
+     }
+ }
+ 
+@@ -964,9 +977,11 @@ void NODE::Remove( LINE& aLine )
+ 
+ void NODE::followLine( LINKED_ITEM* aCurrent, bool aScanDirection, int& aPos, int aLimit,
+                        VECTOR2I* aCorners, LINKED_ITEM** aSegments, bool* aArcReversed,
+-                       bool& aGuardHit, bool aStopAtLockedJoints, bool aFollowLockedSegments )
++                       bool& aGuardHit, bool aStopAtLockedJoints, bool aFollowLockedSegments,
++                       bool aAllowSegmentSizeMismatch )
+ {
+-    bool prevReversed = false;
++    bool      prevReversed = false;
++    const int startWidth = aCurrent->Width();
+ 
+     const VECTOR2I guard = aCurrent->Anchor( aScanDirection );
+ 
+@@ -1004,7 +1019,12 @@ void NODE::followLine( LINKED_ITEM* aCurrent, bool aScanDirection, int& aPos, in
+         if( locked || !jt->IsLineCorner( aFollowLockedSegments ) || aPos < 0 || aPos == aLimit )
+             break;
+ 
+-        aCurrent = jt->NextSegment( aCurrent, aFollowLockedSegments );
++        LINKED_ITEM* next = jt->NextSegment( aCurrent, aFollowLockedSegments );
++
++        if( next && !aAllowSegmentSizeMismatch && next->Width() != startWidth )
++            break;
++
++        aCurrent = next;
+ 
+         prevReversed = ( aCurrent && jt->Pos() == aCurrent->Anchor( aScanDirection ) );
+     }
+@@ -1012,7 +1032,8 @@ void NODE::followLine( LINKED_ITEM* aCurrent, bool aScanDirection, int& aPos, in
+ 
+ 
+ const LINE NODE::AssembleLine( LINKED_ITEM* aSeg, int* aOriginSegmentIndex,
+-                               bool aStopAtLockedJoints, bool aFollowLockedSegments )
++                               bool aStopAtLockedJoints, bool aFollowLockedSegments,
++                               bool aAllowSegmentSizeMismatch )
+ {
+     const int MaxVerts = 1024 * 16;
+ 
+@@ -1032,12 +1053,14 @@ const LINE NODE::AssembleLine( LINKED_ITEM* aSeg, int* aOriginSegmentIndex,
+     pl.SetOwner( this );
+ 
+     followLine( aSeg, false, i_start, MaxVerts, corners.data(), segs.data(), arcReversed.data(),
+-                guardHit, aStopAtLockedJoints, aFollowLockedSegments );
++                guardHit, aStopAtLockedJoints, aFollowLockedSegments,
++                aAllowSegmentSizeMismatch );
+ 
+     if( !guardHit )
+     {
+         followLine( aSeg, true, i_end, MaxVerts, corners.data(), segs.data(), arcReversed.data(),
+-                    guardHit, aStopAtLockedJoints, aFollowLockedSegments );
++                    guardHit, aStopAtLockedJoints, aFollowLockedSegments,
++                aAllowSegmentSizeMismatch );
+     }
+ 
+     int n = 0;
+@@ -1224,15 +1247,12 @@ const JOINT* NODE::FindJoint( const VECTOR2I& aPos, int aLayer, NET_HANDLE aNet
+         f = m_root->m_joints.find( tag );    // m_root->FindJoint(aPos, aLayer, aNet);
+     }
+ 
+-    if( f == end )
+-        return nullptr;
+-
+     while( f != end )
+     {
+-        if( f->second.Layers().Overlaps( aLayer ) )
++        if( f->second.Pos() == aPos && f->second.Net() == aNet && f->second.Layers().Overlaps( aLayer ) )
+             return &f->second;
+ 
+-        ++f;
++        f++;
+     }
+ 
+     return nullptr;
+diff --git a/pcbnew/router/pns_node.h b/pcbnew/router/pns_node.h
+index da6eace..6e134fa 100644
+--- a/pcbnew/router/pns_node.h
++++ b/pcbnew/router/pns_node.h
+@@ -388,9 +388,11 @@ public:
+      *                              segment of the same width as a trivial joint.
+      * @return the line
+      */
++    // aAllowSegmentSizeMismatch: KiCad 9 から移植。false なら太さの違う線分をつながない
+     const LINE AssembleLine( LINKED_ITEM* aSeg, int* aOriginSegmentIndex = nullptr,
+                              bool aStopAtLockedJoints = false,
+-                             bool aFollowLockedSegments = false );
++                             bool aFollowLockedSegments = false,
++                             bool aAllowSegmentSizeMismatch = true );
+ 
+     ///< Print the contents and joints structure.
+     void Dump( bool aLong = false );
+@@ -526,7 +528,8 @@ private:
+     ///< Scan the joint map, forming a line starting from segment (current).
+     void followLine( LINKED_ITEM* aCurrent, bool aScanDirection, int& aPos, int aLimit,
+                      VECTOR2I* aCorners, LINKED_ITEM** aSegments, bool* aArcReversed,
+-                     bool& aGuardHit, bool aStopAtLockedJoints, bool aFollowLockedSegments );
++                     bool& aGuardHit, bool aStopAtLockedJoints, bool aFollowLockedSegments,
++                     bool aAllowSegmentSizeMismatch = true );
+ 
+ private:
+     struct DEFAULT_OBSTACLE_VISITOR;
+diff --git a/pcbnew/router/pns_optimizer.cpp b/pcbnew/router/pns_optimizer.cpp
+index f83b427..19931d5 100644
+--- a/pcbnew/router/pns_optimizer.cpp
++++ b/pcbnew/router/pns_optimizer.cpp
+@@ -120,6 +120,10 @@ OPTIMIZER::OPTIMIZER( NODE* aWorld ) :
+ 
+ OPTIMIZER::~OPTIMIZER()
+ {
++    for( OPT_CONSTRAINT* c : m_constraints )
++        delete c;
++
++    m_constraints.clear();
+ }
+ 
+ 
+@@ -417,16 +421,7 @@ bool OPTIMIZER::checkColliding( ITEM* aItem, bool aUpdateCache )
+ }
+ 
+ 
+-void OPTIMIZER::ClearConstraints()
+-{
+-    for( OPT_CONSTRAINT* c : m_constraints )
+-        delete c;
+-
+-    m_constraints.clear();
+-}
+-
+-
+-void OPTIMIZER::AddConstraint ( OPT_CONSTRAINT *aConstraint )
++void OPTIMIZER::addConstraint ( OPT_CONSTRAINT *aConstraint )
+ {
+     m_constraints.push_back( aConstraint );
+ }
+@@ -633,20 +628,20 @@ bool OPTIMIZER::Optimize( LINE* aLine, LINE* aResult, LINE* aRoot )
+                  wxString::Format( "opt limit-corner-count root %d maxc %d mask %x",
+                                    rootObtuseCorners, aLine->SegmentCount(), angleMask ) );
+ 
+-        AddConstraint( c );
++        addConstraint( c );
+     }
+ 
+     if( m_effortLevel & PRESERVE_VERTEX )
+     {
+         auto c = new PRESERVE_VERTEX_CONSTRAINT( m_world, m_preservedVertex );
+-        AddConstraint( c );
++        addConstraint( c );
+     }
+ 
+     if( m_effortLevel & RESTRICT_VERTEX_RANGE )
+     {
+         auto c = new RESTRICT_VERTEX_RANGE_CONSTRAINT( m_world, m_restrictedVertexRange.first,
+                                                        m_restrictedVertexRange.second );
+-        AddConstraint( c );
++        addConstraint( c );
+     }
+ 
+     if( m_effortLevel & RESTRICT_AREA )
+@@ -654,13 +649,13 @@ bool OPTIMIZER::Optimize( LINE* aLine, LINE* aResult, LINE* aRoot )
+         auto c = new AREA_CONSTRAINT( m_world, m_restrictArea, m_restrictAreaIsStrict );
+         SHAPE_RECT r( m_restrictArea );
+         PNS_DBG( dbg, AddShape, &r, YELLOW, 0, wxT( "area-constraint" ) );
+-        AddConstraint( c );
++        addConstraint( c );
+     }
+ 
+     if( m_effortLevel & KEEP_TOPOLOGY )
+     {
+         auto c = new KEEP_TOPOLOGY_CONSTRAINT( m_world );
+-        AddConstraint( c );
++        addConstraint( c );
+     }
+ 
+     // TODO: Fix for arcs
+diff --git a/pcbnew/router/pns_optimizer.h b/pcbnew/router/pns_optimizer.h
+index a05ceea..6ff7514 100644
+--- a/pcbnew/router/pns_optimizer.h
++++ b/pcbnew/router/pns_optimizer.h
+@@ -153,9 +153,6 @@ public:
+         m_restrictAreaIsStrict = aStrict;
+     }
+ 
+-    void ClearConstraints();
+-    void AddConstraint ( OPT_CONSTRAINT *aConstraint );
+-
+ private:
+     static const int MaxCachedItems = 256;
+ 
+@@ -169,6 +166,8 @@ private:
+         bool m_isStatic;
+     };
+ 
++
++    void addConstraint ( OPT_CONSTRAINT *aConstraint );
+     bool mergeObtuse( LINE* aLine );
+     bool mergeFull( LINE* aLine );
+     bool mergeColinear( LINE* aLine );
+diff --git a/pcbnew/router/pns_shove.cpp b/pcbnew/router/pns_shove.cpp
+index 3bb6be3..7a96c47 100644
+--- a/pcbnew/router/pns_shove.cpp
++++ b/pcbnew/router/pns_shove.cpp
+@@ -1143,7 +1143,7 @@ void SHOVE::unwindLineStack( const LINKED_ITEM* aSeg )
+ 
+     for( std::vector<LINE>::iterator i = m_optimizerQueue.begin(); i != m_optimizerQueue.end() ; )
+     {
+-        if( i->ContainsLink( aSeg ) )
++        if( i->ContainsLink( aSeg ) && !aSeg->OfKind( ITEM::VIA_T ) )
+             i = m_optimizerQueue.erase( i );
+         else
+             i++;
+diff --git a/pcbnew/router/pns_topology.cpp b/pcbnew/router/pns_topology.cpp
+index f8bfedd..e3d18db 100644
+--- a/pcbnew/router/pns_topology.cpp
++++ b/pcbnew/router/pns_topology.cpp
+@@ -42,7 +42,7 @@ bool TOPOLOGY::SimplifyLine( LINE* aLine )
+         return false;
+ 
+     LINKED_ITEM* root = aLine->GetLink( 0 );
+-    LINE l = m_world->AssembleLine( root );
++    LINE l = m_world->AssembleLine( root, nullptr, false, false, false );
+     SHAPE_LINE_CHAIN simplified( l.CLine() );
+ 
+     simplified.Simplify();
+@@ -75,7 +75,7 @@ const TOPOLOGY::JOINT_SET TOPOLOGY::ConnectedJoints( const JOINT* aStart )
+ 
+         for( ITEM* item : current->LinkList() )
+         {
+-            if( item->OfKind( ITEM::SEGMENT_T ) )
++            if( item->OfKind( ITEM::SEGMENT_T | ITEM::ARC_T ) )
+             {
+                 const JOINT* a = m_world->FindJoint( item->Anchor( 0 ), item );;
+                 const JOINT* b = m_world->FindJoint( item->Anchor( 1 ), item );;
+@@ -111,12 +111,27 @@ bool TOPOLOGY::NearestUnconnectedAnchorPoint( const LINE* aTrack, VECTOR2I& aPoi
+     if( !jt || m_world->GetRuleResolver()->NetCode( jt->Net() ) <= 0 )
+        return false;
+ 
++    ITEM* connected = nullptr;
++
+     if( ( !track.EndsWithVia() && jt->LinkCount() >= 2 )
+             || ( track.EndsWithVia() && jt->LinkCount() >= 3 ) ) // we got something connected
++    {
++        // tmpNode's own track is freed on return, skip it to avoid a dangling anchor item
++        for( ITEM* link : jt->LinkList() )
++        {
++            if( !link->BelongsTo( tmpNode.get() ) )
++            {
++                connected = link;
++                break;
++            }
++        }
++    }
++
++    if( connected )
+     {
+         end = jt->Pos();
+         aLayers = jt->Layers();
+-        aItem = jt->LinkList()[0];
++        aItem = connected;
+     }
+     else
+     {
+@@ -231,7 +246,7 @@ bool TOPOLOGY::followTrivialPath( LINE* aLine2, bool aLeft, ITEM_SET& aSet,
+         {
+             if( link->OfKind( ITEM::VIA_T ) )
+                 via = link;
+-            else if( visited.insert( link ).second )
++            else if( visited.count( link ) == 0 )  // 8.0 は C++17 のため contains() が使えない
+                 next_seg = static_cast<SEGMENT*>( link );
+         }
+ 

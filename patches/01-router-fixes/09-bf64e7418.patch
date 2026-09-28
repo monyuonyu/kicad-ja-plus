@@ -1,0 +1,40 @@
+From bf64e74188c9477213cee8ff287a49019a9e3ebd Mon Sep 17 00:00:00 2001
+From: Tomasz Wlostowski <tomasz.wlostowski@cern.ch>
+Date: Fri, 10 Jan 2025 14:45:35 +0100
+Subject: [PATCH] router: fix regression in simplifyNewLine() causing
+ unnecessary segments to be added to board (forming loops)
+
+(note to self: OPTIMIZER now unlinks the in-place-optimized LINEs)
+---
+ pcbnew/router/pns_line_placer.cpp | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/pcbnew/router/pns_line_placer.cpp b/pcbnew/router/pns_line_placer.cpp
+index 3e051c76b..2202a8ead 100644
+--- a/pcbnew/router/pns_line_placer.cpp
++++ b/pcbnew/router/pns_line_placer.cpp
+@@ -1913,7 +1913,8 @@ void LINE_PLACER::simplifyNewLine( NODE* aNode, LINKED_ITEM* aLatest )
+ 
+     // And now we can proceed with assembling the final line and optimizing it.
+ 
+-    LINE l = aNode->AssembleLine( aLatest );
++    LINE l_orig = aNode->AssembleLine( aLatest );
++    LINE l( l_orig );
+ 
+     bool optimized = OPTIMIZER::Optimize( &l, OPTIMIZER::MERGE_COLINEAR, aNode );
+ 
+@@ -1923,9 +1924,10 @@ void LINE_PLACER::simplifyNewLine( NODE* aNode, LINKED_ITEM* aLatest )
+ 
+     if( optimized || simplified.PointCount() != l.PointCount() )
+     {
+-        aNode->Remove( l );
++        aNode->Remove( l_orig );
+         l.SetShape( simplified );
+         aNode->Add( l );
++        PNS_DBG( Dbg(), AddItem, &l, RED, 100000, wxT("simplified"));
+     }
+ }
+ 
+-- 
+2.43.0
+

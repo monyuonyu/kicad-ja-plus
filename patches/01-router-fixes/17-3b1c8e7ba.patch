@@ -1,0 +1,35 @@
+From 3b1c8e7bace4be68ea0afd32dc53fb16548a2315 Mon Sep 17 00:00:00 2001
+From: Felix Schneider <schneider@yasit.net>
+Date: Thu, 7 May 2026 13:40:34 -0400
+Subject: [PATCH] router: clear SpringbackDoNotTouchNode when m_endItem is null
+ during shove
+
+If a node is touched during a shove operation springback is inhibited on
+that node. As SpringbackDoNotTouchNode was never cleared, even after the
+cursor moved on, springback stops working after an obstacle was touched.
+
+Fixes #13207
+---
+ pcbnew/router/pns_line_placer.cpp | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/pcbnew/router/pns_line_placer.cpp b/pcbnew/router/pns_line_placer.cpp
+index 4e061b730..d418075c8 100644
+--- a/pcbnew/router/pns_line_placer.cpp
++++ b/pcbnew/router/pns_line_placer.cpp
+@@ -948,6 +948,12 @@ bool LINE_PLACER::rhShoveOnly( const VECTOR2I& aP, LINE& aNewHead, LINE& aNewTai
+         // Make sure the springback algorithm won't erase the NODE that owns m_endItem.
+         m_shove->SetSpringbackDoNotTouchNode( static_cast<const NODE*>( m_endItem->Owner() ) );
+     }
++    else
++    {
++        // No end item under the cursor anymore. Clear the DoNotTouchNode so springback
++        // can roll back past frames pinned by an earlier obstacle touch.
++        m_shove->SetSpringbackDoNotTouchNode( nullptr );
++    }
+ 
+     LINE newHead( walkSolids );
+ 
+-- 
+2.43.0
+

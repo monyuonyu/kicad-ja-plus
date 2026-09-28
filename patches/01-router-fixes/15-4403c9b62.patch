@@ -1,0 +1,24 @@
+From 4403c9b62f2d433800b52a845e518112a983c4f3 Mon Sep 17 00:00:00 2001
+From: Jeff Young <jeff@rokeby.ie>
+Date: Mon, 23 Jun 2025 10:22:26 -0600
+Subject: [PATCH] Uninitialized variable.
+
+---
+ pcbnew/router/pns_diff_pair_placer.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/pcbnew/router/pns_diff_pair_placer.cpp b/pcbnew/router/pns_diff_pair_placer.cpp
+index 9bbb3ea93..1a0642c33 100644
+--- a/pcbnew/router/pns_diff_pair_placer.cpp
++++ b/pcbnew/router/pns_diff_pair_placer.cpp
+@@ -46,6 +46,7 @@ DIFF_PAIR_PLACER::DIFF_PAIR_PLACER( ROUTER* aRouter ) :
+     m_shove = nullptr;
+     m_currentNode = nullptr;
+     m_lastNode = nullptr;
++    m_lastFixNode = nullptr;
+     m_placingVia = false;
+     m_viaDiameter = 0;
+     m_viaDrill = 0;
+-- 
+2.43.0
+

@@ -1,0 +1,114 @@
+diff --git a/common/jobs/job_pcb_drc.h b/common/jobs/job_pcb_drc.h
+index 91cfa3d..e5bf380 100644
+--- a/common/jobs/job_pcb_drc.h
++++ b/common/jobs/job_pcb_drc.h
+@@ -58,6 +58,10 @@ public:
+ 
+     bool m_exitCodeViolations;
+     bool m_parity;
++
++    // KiCad 10 から移植: DRC の前にベタを再計算し、必要なら基板を保存する
++    bool m_refillZones = false;
++    bool m_saveBoard = false;
+ };
+ 
+ #endif
+diff --git a/kicad/cli/command_pcb_drc.cpp b/kicad/cli/command_pcb_drc.cpp
+index 3ab386a..4cf0b30 100644
+--- a/kicad/cli/command_pcb_drc.cpp
++++ b/kicad/cli/command_pcb_drc.cpp
+@@ -38,6 +38,8 @@
+ #define ARG_SEVERITY_EXCLUSIONS "--severity-exclusions"
+ #define ARG_EXIT_CODE_VIOLATIONS "--exit-code-violations"
+ #define ARG_PARITY "--schematic-parity"
++#define ARG_ZONE_FILL "--refill-zones"
++#define ARG_SAVE_BOARD "--save-board"
+ 
+ CLI::PCB_DRC_COMMAND::PCB_DRC_COMMAND() : COMMAND( "drc" )
+ {
+@@ -60,6 +62,14 @@ CLI::PCB_DRC_COMMAND::PCB_DRC_COMMAND() : COMMAND( "drc" )
+             .help( UTF8STDSTR( _( "Test for parity between PCB and schematic" ) ) )
+             .flag();
+ 
++    m_argParser.add_argument( ARG_ZONE_FILL )
++            .help( UTF8STDSTR( _( "Refill zones before running DRC" ) ) )
++            .flag();
++
++    m_argParser.add_argument( ARG_SAVE_BOARD )
++            .help( UTF8STDSTR( _( "Save the board after DRC, must be used with --refill-zones" ) ) )
++            .flag();
++
+     m_argParser.add_argument( ARG_UNITS )
+             .default_value( std::string( "mm" ) )
+             .help( UTF8STDSTR( _( "Report units; valid options: in, mm, mils" ) ) )
+@@ -163,6 +173,8 @@ int CLI::PCB_DRC_COMMAND::doPerform( KIWAY& aKiway )
+     }
+ 
+     drcJob->m_parity = m_argParser.get<bool>( ARG_PARITY );
++    drcJob->m_refillZones = m_argParser.get<bool>( ARG_ZONE_FILL );
++    drcJob->m_saveBoard = m_argParser.get<bool>( ARG_SAVE_BOARD );
+ 
+     int exitCode = aKiway.ProcessJob( KIWAY::FACE_PCB, drcJob.get() );
+ 
+diff --git a/pcbnew/pcbnew_jobs_handler.cpp b/pcbnew/pcbnew_jobs_handler.cpp
+index 7a5df61..88ae860 100644
+--- a/pcbnew/pcbnew_jobs_handler.cpp
++++ b/pcbnew/pcbnew_jobs_handler.cpp
+@@ -46,6 +46,8 @@
+ #include <plotters/plotters_pslike.h>
+ #include <tool/tool_manager.h>
+ #include <tools/drc_tool.h>
++#include <zone_filler.h>
++#include <locale_io.h>
+ #include <gerber_jobfile_writer.h>
+ #include "gerber_placefile_writer.h"
+ #include <gendrill_Excellon_writer.h>
+@@ -1165,6 +1167,23 @@ int PCBNEW_JOBS_HANDLER::JobExportDrc( JOB* aJob )
+         }
+     }
+ 
++    // KiCad 10 から移植: DRC の前にベタを再計算する(画面なしで ZONE_FILLER を直接使う)
++    if( drcJob->m_refillZones )
++    {
++        if( aJob->IsCli() )
++            m_reporter->Report( _( "Refilling all zones...\n" ), RPT_SEVERITY_INFO );
++
++        std::vector<ZONE*> zones( brd->Zones().begin(), brd->Zones().end() );
++        ZONE_FILLER        filler( brd, &commit );
++        filler.Fill( zones );
++        brd->BuildConnectivity();
++    }
++    else if( drcJob->m_saveBoard )
++    {
++        m_reporter->Report( _( "--save-board requires --refill-zones; the board will not be saved.\n" ),
++                            RPT_SEVERITY_WARNING );
++    }
++
+     drcEngine->SetProgressReporter( nullptr );
+     drcEngine->SetViolationHandler(
+             [&]( const std::shared_ptr<DRC_ITEM>& aItem, VECTOR2I aPos, int aLayer )
+@@ -1228,6 +1247,24 @@ int PCBNEW_JOBS_HANDLER::JobExportDrc( JOB* aJob )
+     m_reporter->Report( wxString::Format( _( "Saved DRC Report to %s\n" ), drcJob->m_outputFile ),
+                         RPT_SEVERITY_INFO );
+ 
++    // KiCad 10 から移植: ベタを再計算した基板を保存する(KiCad 8 の形式のまま)
++    if( drcJob->m_refillZones && drcJob->m_saveBoard )
++    {
++        try
++        {
++            LOCALE_IO          dummy;
++            PCB_IO_KICAD_SEXPR io;
++            io.SaveBoard( drcJob->m_filename, brd );
++            m_reporter->Report( _( "Saved board\n" ), RPT_SEVERITY_INFO );
++        }
++        catch( const IO_ERROR& ioe )
++        {
++            m_reporter->Report( wxString::Format( _( "Failed to save board: %s\n" ), ioe.What() ),
++                                RPT_SEVERITY_ERROR );
++            return CLI::EXIT_CODES::ERR_INVALID_OUTPUT_CONFLICT;
++        }
++    }
++
+     if( drcJob->m_exitCodeViolations )
+     {
+         if( markersProvider->GetCount() > 0 || ratsnestProvider->GetCount() > 0

@@ -1,0 +1,29 @@
+From 0256ccb6a6c1521c474a38f98e61ea8198a15b6e Mon Sep 17 00:00:00 2001
+From: Tomasz Wlostowski <tomasz.wlostowski@cern.ch>
+Date: Sun, 22 Jun 2025 00:24:16 +0200
+Subject: [PATCH] router: TOPOLOGY::SimplifyLine() should not try to merge
+ segments of differing widths
+
+Note to self: likely a regression after adding aAllowSegmentSizeMismatch parameter (default = true) to AssembleLine(). We need to improve the simplification algorithm to take differing widths into account.
+
+Fixes https://gitlab.com/kicad/code/kicad/-/issues/21078
+---
+ pcbnew/router/pns_topology.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/pcbnew/router/pns_topology.cpp b/pcbnew/router/pns_topology.cpp
+index 9b4b99e08..ba041207f 100644
+--- a/pcbnew/router/pns_topology.cpp
++++ b/pcbnew/router/pns_topology.cpp
+@@ -43,7 +43,7 @@ bool TOPOLOGY::SimplifyLine( LINE* aLine )
+         return false;
+ 
+     LINKED_ITEM* root = aLine->GetLink( 0 );
+-    LINE l = m_world->AssembleLine( root );
++    LINE l = m_world->AssembleLine( root, nullptr, false, false, false );
+     SHAPE_LINE_CHAIN simplified( l.CLine() );
+ 
+     simplified.Simplify();
+-- 
+2.43.0
+

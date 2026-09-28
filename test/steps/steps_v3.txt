@@ -1,0 +1,5 @@
+# v2 で引き直した配線を整える
+optimize R10.2
+optimize R9.2
+optimize R14.2
+check

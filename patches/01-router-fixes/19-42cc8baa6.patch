@@ -1,0 +1,29 @@
+From 42cc8baa66a3ab664626d3f6bf3a72c7575ba341 Mon Sep 17 00:00:00 2001
+From: Jon Evans <jon@craftyjon.com>
+Date: Tue, 11 Aug 2026 23:12:20 -0400
+Subject: [PATCH] PNS: fix posture optimization after FixRoute
+
+Pass lastSegDir into the mouse tracer so
+that it uses the most recent segment before
+the fixed point as the basis for posture
+optimization instead of starting over.
+---
+ pcbnew/router/pns_line_placer.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/pcbnew/router/pns_line_placer.cpp b/pcbnew/router/pns_line_placer.cpp
+index baae2c691..6e4da027f 100644
+--- a/pcbnew/router/pns_line_placer.cpp
++++ b/pcbnew/router/pns_line_placer.cpp
+@@ -1752,7 +1752,7 @@ bool LINE_PLACER::FixRoute( const VECTOR2I& aP, ITEM* aEndItem, bool aForceFinis
+         m_mouseTrailTracer.Clear();
+         m_mouseTrailTracer.SetTolerance( m_head.Width() );
+         m_mouseTrailTracer.AddTrailPoint( m_currentStart );
+-        m_mouseTrailTracer.SetDefaultDirections( lastSegDir, DIRECTION_45::UNDEFINED );
++        m_mouseTrailTracer.SetDefaultDirections( lastSegDir, lastSegDir );
+ 
+         m_placementCorrect = true;
+     }
+-- 
+2.43.0
+

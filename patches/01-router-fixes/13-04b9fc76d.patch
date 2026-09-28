@@ -1,0 +1,34 @@
+From 04b9fc76d0bb38700602f7d437c88e9d287b0831 Mon Sep 17 00:00:00 2001
+From: Jon Evans <jon@craftyjon.com>
+Date: Mon, 26 May 2025 22:48:13 -0400
+Subject: [PATCH] PNS: Fix early exit from followTrivialPath
+
+Don't mark a segment as visited until the
+start of the next loop.
+
+Fixes https://gitlab.com/kicad/code/kicad/-/issues/20379
+
+
+(cherry picked from commit 52e9cdde992e0a888f9a66575594758dbcd2336a)
+
+Co-authored-by: Jon Evans <jon@craftyjon.com>
+---
+ pcbnew/router/pns_topology.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/pcbnew/router/pns_topology.cpp b/pcbnew/router/pns_topology.cpp
+index 5bd86d206..f46c6a199 100644
+--- a/pcbnew/router/pns_topology.cpp
++++ b/pcbnew/router/pns_topology.cpp
+@@ -233,7 +233,7 @@ bool TOPOLOGY::followTrivialPath( LINE* aLine2, bool aLeft, ITEM_SET& aSet,
+         {
+             if( link->OfKind( ITEM::VIA_T ) )
+                 via = link;
+-            else if( visited.insert( link ).second )
++            else if( !visited.contains( link ) )
+                 next_seg = static_cast<SEGMENT*>( link );
+         }
+ 
+-- 
+2.43.0
+

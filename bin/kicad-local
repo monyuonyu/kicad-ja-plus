@@ -1,0 +1,184 @@
+#!/bin/bash
+# kicad-local: 修正版 KiCad 8.0.9(ローカルビルド)の入口。ファイル形式は KiCad 8 のまま。
+# 変更一覧: patches/README.md
+# このリポジトリの場所(道具と試験を探す)と、修正版 KiCad をビルドした場所
+KICAD_LOCAL_HOME=${KICAD_LOCAL_HOME:-$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)}
+KICAD_LOCAL_BUILD=${KICAD_LOCAL_BUILD:-$HOME/src/build-8.0.9}
+export KICAD_LOCAL_HOME KICAD_LOCAL_BUILD
+export PATH="$KICAD_LOCAL_HOME/bin:$PATH"   # ほかの入口(kicad-python など)を名前で呼ぶ
+SRC=${KICAD_LOCAL_SRC:-$HOME/src/kicad-8.0.9}
+BUILD=$KICAD_LOCAL_BUILD
+PATCHES=$KICAD_LOCAL_HOME/patches
+
+usage() {
+cat <<'HELP'
+kicad-local: 修正版 KiCad 8.0.9 の道具をまとめた入口(保存形式は KiCad 8。KiCad 8 で開ける)
+
+よく使う:
+  kicad-local drc <基板.kicad_pcb> [--refill]   DRC を回して要点(種類ごとの件数と位置)を表示
+                                                --refill でベタを塗り直してから(基板は変えない)
+  kicad-local erc <回路図.kicad_sch>           ERC を回して要点を表示
+  kicad-local lint <回路図.kicad_sch>          設計の定石からの外れを点検(外部の線の保護・ベース抵抗・
+                                                TVS/電解の向き・電源の入出力コンデンサ・つなぎ忘れ)
+  kicad-local render <基板> [top|bottom|iso|iso-hq] [出力.png]
+                                                3D 画像(既定 iso → <基板名>_iso.png)
+  kicad-local stats <基板>                      基板の統計(部品・パッド・穴径・面積など)
+  kicad-local route <入力> <出力|-> <手順|-> [--instructions 指示書.md]
+                                                画面なしの配線・部品移動(命令は kicad-local route --help)
+
+  kicad-local sch <入力.kicad_sch> <出力|-> <手順|-> [--instructions 指示書.md]
+                                                画面なしで回路図を直す(値・欄・記号の差し替え・削除・直列挿入・
+                                                部品追加・ラベル)。保存後に接続と部品表の差・ERC を表示
+                                                (命令は kicad-local sch --help)
+  kicad-local pcbsync <回路図> <基板> <出力> [--swap] [--at x,y]
+                                                回路図の変更を基板へ(画面の「回路図から基板を更新」)。部品の追加・
+                                                ネットの更新・つながりの変わった配線の削除。--swap でフットプリント差し替え
+  kicad-local silkfix <入力> <出力> 部品番号 ... [--r 10]
+                                                部品番号の文字を重ならない所へ(route の silk より広く探す)
+シミュレーション(回路図から自動で組み立て、ngspice):
+  kicad-local sim run <手順.toml> [--out 出力] [--runs N]   波形・測定値・ばらつき・版の比較(手順の書き方は下の README)
+  kicad-local sim nets <回路図>                            ネット名と端子の一覧(手順を書くとき用)
+  kicad-local sim parts --sch <回路図>                     部品がどう SPICE 化されるか
+  (README: tools/ksim/README.md、例題: tools/ksim/examples/)
+
+まとめて確認(新しい版が来たらまずこれ):
+  kicad-local review <新しい版> [前の版] [--sim 手順.toml ...] [--runs N] [--out 出力]
+                                                ERC・DRC・3D、前の版との 部品表/接続/製造データ/3D の差分、
+                                                シミュレーション(定格チェックつき)を 1 回で → 出力/報告.md
+                                                (版はフォルダか .kicad_pro/.kicad_sch/.kicad_pcb)
+比べる:
+  kicad-local fabdiff <基板A> <基板B> [出力フォルダ]
+                                                両方の製造データ(ガーバー・ドリル。基板の出力設定)を
+                                                層ごとに比べ、差分画像と場所の一覧を出す
+                                                (灰=共通 / 赤=消えた / 緑=増えた / 青枠=差のある場所)
+  kicad-local renderdiff <基板A> <基板B> [top|bottom] [出力.png]
+                                                3D 画像を並べ、変わった所に色を付けた画像を出す
+  kicad-local gerber info|diff|dirdiff ...      ガーバー/ドリル単体の情報・差分
+
+そのまま渡す:
+  kicad-local cli ...        修正版 kicad-cli(pcb drc --refill-zones --save-board、pcb render、
+                             pcb export stats、DRC JSON の位置と層 など)
+  kicad-local python ...     SWIG の Remove バグを直した pcbnew モジュールで python3
+
+管理:
+  kicad-local patches        取り込んだ変更の一覧(出どころと確認結果)
+  kicad-local rebuild        ソースを変えたあとの再ビルド(差分だけ。数分)
+  kicad-local test           回帰試験(配線の形・DRC が基準どおりか)
+HELP
+}
+
+summarize() {  # DRC/ERC の JSON を要点にする
+python3 - "$1" <<'PY'
+import json,sys,collections
+d=json.load(open(sys.argv[1]))
+noise=("lib_footprint_mismatch","silk_edge_clearance","silk_overlap","silk_over_copper","lib_symbol_issues")
+def items(v):
+    return " ⇔ ".join(i.get("description","")[:48] for i in v.get("items",[])[:2])
+def show(title, arr):
+    c=collections.Counter(v["type"] for v in arr)
+    main=[v for v in arr if v["type"] not in noise]
+    print(f"{title}: {len(arr)} 件" + (f"(うち要確認 {len(main)} 件)" if len(main)!=len(arr) else ""))
+    for t,n in c.most_common():
+        mark="  " if t in noise else "! "
+        print(f"  {mark}{t}: {n}")
+        if t not in noise:
+            for v in [x for x in arr if x["type"]==t][:8]:
+                p=v.get("pos") or (v.get("items") or [{}])[0].get("pos")
+                ps=f"({p['x']:.2f}, {p['y']:.2f})" if p else ""
+                print(f"       {ps} {v.get('layer','')} {items(v)}")
+if "violations" in d:
+    show("DRC 違反", d["violations"]); show("未配線", d.get("unconnected_items",[])); show("回路図との不一致", d.get("schematic_parity",[]))
+else:
+    arr=[v for s in d.get("sheets",[]) for v in s.get("violations",[])]
+    show("ERC", arr)
+print("(先頭が ! の項目が要確認。ライブラリ差分・シルクの警告は参考)")
+PY
+}
+
+cmd=${1:-help}; shift || true
+case "$cmd" in
+  help|-h|--help) usage ;;
+  cli) exec kicad-cli-local "$@" ;;
+  python) exec kicad-python "$@" ;;
+  route) exec kicad-route "$@" ;;
+  drc)
+    b=$1; shift; extra=""; [ "$1" = "--refill" ] && extra="--refill-zones"
+    [ -f "$b" ] || { echo "基板がない: $b"; exit 2; }
+    t=$(mktemp -d); kicad-cli-local pcb drc --schematic-parity --format json $extra -o "$t/drc.json" "$b" >/dev/null 2>&1
+    [ -f "$t/drc.json" ] && summarize "$t/drc.json"; rm -rf "$t" ;;
+  erc)
+    s=$1; [ -f "$s" ] || { echo "回路図がない: $s"; exit 2; }
+    t=$(mktemp -d); kicad-cli-local sch erc --format json -o "$t/erc.json" "$s" >/dev/null 2>&1
+    [ -f "$t/erc.json" ] && summarize "$t/erc.json"; rm -rf "$t" ;;
+  render)
+    b=$1; view=${2:-iso}; out=${3:-"${b%.kicad_pcb}_${view}.png"}
+    case "$view" in
+      top) a=(--side top) ;; bottom) a=(--side bottom) ;;
+      iso) a=(--rotate -45,0,45 --perspective) ;;
+      iso-hq) a=(--rotate -45,0,45 --perspective --quality high --floor) ;;
+      *) echo "視点は top / bottom / iso / iso-hq"; exit 2 ;;
+    esac
+    kicad-cli-local pcb render "${a[@]}" -w 1600 -h 1200 -o "$out" "$b" 2>&1 | grep -E "Successfully|Error|not supported" ; echo "→ $out" ;;
+  stats)
+    b=$1; t=$(mktemp -d); kicad-cli-local pcb export stats -o "$t/s.txt" "$b" >/dev/null 2>&1 && sed -n '/^Board$/,$p' "$t/s.txt"; rm -rf "$t" ;;
+  gerber) exec kicad-gerber "$@" ;;
+  pcbsync) exec kicad-python "$KICAD_LOCAL_HOME/tools/pcbsync.py" "$@" ;;
+  silkfix) exec kicad-python "$KICAD_LOCAL_HOME/tools/silkfix.py" "$@" ;;
+  lint) exec python3 "$KICAD_LOCAL_HOME/tools/klint.py" "$@" ;;
+  sch) exec python3 "$KICAD_LOCAL_HOME/tools/ksch.py" "$@" ;;
+  review) exec python3 "$KICAD_LOCAL_HOME/tools/review.py" "$@" ;;
+  sim) exec python3 "$KICAD_LOCAL_HOME/tools/ksim/ksim.py" "$@" ;;
+  fabdiff)
+    a=$1; b=$2; out=${3:-"fabdiff_$(date +%Y%m%d_%H%M%S)"}
+    [ -f "$a" ] && [ -f "$b" ] || { echo "基板がない: $a / $b"; exit 2; }
+    t=$(mktemp -d); mkdir -p "$t/A" "$t/B"
+    for k in A B; do
+      src=$([ $k = A ] && echo "$a" || echo "$b"); n=$(basename "$src" .kicad_pcb)
+      # ファイル名をそろえるため、両方を同じ名前でコピーしてから出す
+      cp "$src" "$t/$k/board.kicad_pcb"; [ -f "${src%.kicad_pcb}.kicad_pro" ] && cp "${src%.kicad_pcb}.kicad_pro" "$t/$k/board.kicad_pro"
+      # 穴の印は設計の中身ではないので、比べる前に両方とも「なし」にそろえる(一時コピーだけ)
+      grep -q "(drillshape [1-9])" "$t/$k/board.kicad_pcb" && echo "(比較用に $k の穴の印を「なし」にそろえた)" >&2
+      cp "$t/$k/board.kicad_pcb" "$t/$k/orig.kicad_pcb"
+      sed -i 's/(drillshape [0-9])/(drillshape 0)/' "$t/$k/board.kicad_pcb"
+      mkdir -p "$t/$k/gbr"
+      (cd "$t/$k" && kicad-cli-local pcb export gerbers --board-plot-params -o gbr/ board.kicad_pcb >/dev/null 2>&1
+                     kicad-cli-local pcb export drill -o gbr/ board.kicad_pcb >/dev/null 2>&1)
+    done
+    mkdir -p "$out"
+    kicad-gerber dirdiff "$t/A/gbr" "$t/B/gbr" --out "$out" | grep -E "^board|基準|差なし|差のある場所|差のあった"
+    # 出力設定の注意: 穴の印(drillshape)が入っているとメーカーが外形や穴と誤解するおそれ
+    for k in A B; do
+      ds=$(grep -o "(drillshape [0-9]*)" "$t/$k/orig.kicad_pcb" | grep -o "[0-9]*")
+      [ -n "$ds" ] && [ "$ds" != "0" ] && echo "注意: $([ $k = A ] && echo "$a" || echo "$b") の出力設定で穴の印(drillshape $ds)が有効。ガーバーの全層に穴の印が入る(メーカー向けは「なし」が基本)"
+    done
+    rm -rf "$t"; echo "→ $out/差分まとめ.md" ;;
+  renderdiff)
+    a=$1; b=$2; side=${3:-top}; out=${4:-"renderdiff_$(date +%Y%m%d_%H%M%S).png"}
+    t=$(mktemp -d)
+    kicad-cli-local pcb render --side "$side" -w 1600 -h 1200 -o "$t/a.png" "$a" >/dev/null 2>&1
+    kicad-cli-local pcb render --side "$side" -w 1600 -h 1200 -o "$t/b.png" "$b" >/dev/null 2>&1
+    python3 - "$t/a.png" "$t/b.png" "$out" "$(basename "$a")" "$(basename "$b")" <<'PY'
+import sys
+from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageFilter
+a=Image.open(sys.argv[1]).convert("RGB"); b=Image.open(sys.argv[2]).convert("RGB")
+d=ImageChops.difference(a,b).convert("L").point(lambda v:255 if v>40 else 0).filter(ImageFilter.MaxFilter(5))
+base=b.convert("L").convert("RGB")
+tint=Image.new("RGB",b.size,(255,40,200))
+hl=Image.composite(Image.blend(b,tint,0.55),base,d)
+# 変わった所を枠で囲む
+box=d.getbbox()
+W,H=a.size; out=Image.new("RGB",(W*3,H+50),"white"); dr=ImageDraw.Draw(out)
+try: f=ImageFont.truetype("/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf",30)
+except Exception: f=None
+for i,(im,t) in enumerate(((a,"A: "+sys.argv[4]),(b,"B: "+sys.argv[5]),(hl,"差分(変わった所を桃色)"))):
+    out.paste(im,(i*W,50)); dr.text((i*W+10,8),t,fill="black",font=f)
+n=sum(1 for p in d.getdata() if p)
+out.save(sys.argv[3])
+print(f"変わった画素 {n}({100*n/(W*H):.2f}%)" + (f"、範囲 x{box[0]}-{box[2]} y{box[1]}-{box[3]} px" if box else "、差なし"))
+PY
+    rm -rf "$t"; echo "→ $out" ;;
+  patches) sed -n '1,200p' "$PATCHES/README.md" ;;
+  rebuild) cd "$BUILD" && ninja -j5 kicad-cli pcbnew_kiface eeschema_kiface cvpcb_kiface kicad_route kicad_gerber pcbnew/_pcbnew.so s3d_plugin_vrml s3d_plugin_oce s3d_plugin_idf 2>&1 | tail -2 ;;
+  test) exec "$KICAD_LOCAL_HOME/test/regress.sh" ;;
+  *) echo "不明な命令: $cmd"; usage; exit 2 ;;
+esac

@@ -1,0 +1,11 @@
+#!/bin/bash
+# KiCad 8.0.9 の押しのけ配線ルーターを画面なしで使う(ソース: ~/src/kicad-8.0.9/qa/tools/pns/kicad_route_main.cpp)
+# 使い方は kicad-route --help
+# このリポジトリの場所(道具と試験を探す)と、修正版 KiCad をビルドした場所
+KICAD_LOCAL_HOME=${KICAD_LOCAL_HOME:-$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)}
+KICAD_LOCAL_BUILD=${KICAD_LOCAL_BUILD:-$HOME/src/build-8.0.9}
+export KICAD_LOCAL_HOME KICAD_LOCAL_BUILD
+export KICAD8_FOOTPRINT_DIR=${KICAD8_FOOTPRINT_DIR:-/usr/share/kicad/footprints}
+export KICAD8_SYMBOL_DIR=${KICAD8_SYMBOL_DIR:-/usr/share/kicad/symbols}
+export KICAD8_3DMODEL_DIR=${KICAD8_3DMODEL_DIR:-/usr/share/kicad/3dmodels}
+exec "$KICAD_LOCAL_BUILD/qa/tools/pns/kicad_route" "$@"

@@ -1,0 +1,28 @@
+From bfb3875a6839a17540adba0dc0568ab95d702ee6 Mon Sep 17 00:00:00 2001
+From: Seth Hillbrand <seth@kipro-pcb.com>
+Date: Tue, 14 Jan 2025 12:16:13 -0800
+Subject: [PATCH] Add additional handling for arc collisions
+
+Provides nearest point calculation for circles, segments and rects
+
+Fixes https://gitlab.com/kicad/code/kicad/-/issues/18203
+---
+ pcbnew/router/pns_line_placer.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/pcbnew/router/pns_line_placer.cpp b/pcbnew/router/pns_line_placer.cpp
+index 2202a8ead..7148bfaaf 100644
+--- a/pcbnew/router/pns_line_placer.cpp
++++ b/pcbnew/router/pns_line_placer.cpp
+@@ -831,7 +831,7 @@ bool LINE_PLACER::rhMarkObstacles( const VECTOR2I& aP, LINE& aNewHead, LINE& aNe
+         DIRECTION_45::CORNER_MODE cornerMode = Settings().GetCornerMode();
+ 
+         if( cornerMode == DIRECTION_45::MITERED_90 || cornerMode == DIRECTION_45::ROUNDED_90 )
+-            nearest = hull.BBox().ClosestPointTo( aP );
++            nearest = hull.BBox().NearestPoint( aP );
+         else
+             nearest = hull.NearestPoint( aP );
+ 
+-- 
+2.43.0
+

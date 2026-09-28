@@ -1,0 +1,154 @@
+From 6078bc52eb3e9c0aff53613ceffbb128a6156ba9 Mon Sep 17 00:00:00 2001
+From: Roberto Fernandez Bautista <roberto.fer.bau@gmail.com>
+Date: Sun, 31 Mar 2024 15:09:04 +0200
+Subject: [PATCH] PNS: Fix a few memory leaks
+
+---
+ pcbnew/router/pns_kicad_iface.cpp |  5 ++---
+ pcbnew/router/pns_kicad_iface.h   |  4 ++--
+ pcbnew/router/pns_optimizer.cpp   | 25 ++++++++++---------------
+ pcbnew/router/pns_optimizer.h     |  5 ++---
+ 4 files changed, 16 insertions(+), 23 deletions(-)
+
+diff --git a/pcbnew/router/pns_kicad_iface.cpp b/pcbnew/router/pns_kicad_iface.cpp
+index 1a824d7f1..81f126f56 100644
+--- a/pcbnew/router/pns_kicad_iface.cpp
++++ b/pcbnew/router/pns_kicad_iface.cpp
+@@ -1057,14 +1057,13 @@ PNS_KICAD_IFACE::PNS_KICAD_IFACE()
+ 
+ PNS_KICAD_IFACE_BASE::~PNS_KICAD_IFACE_BASE()
+ {
++    delete m_ruleResolver;
++    delete m_debugDecorator;
+ }
+ 
+ 
+ PNS_KICAD_IFACE::~PNS_KICAD_IFACE()
+ {
+-    delete m_ruleResolver;
+-    delete m_debugDecorator;
+-
+     if( m_previewItems )
+     {
+         m_previewItems->FreeItems();
+diff --git a/pcbnew/router/pns_kicad_iface.h b/pcbnew/router/pns_kicad_iface.h
+index 8ee481d99..36d1d44bf 100644
+--- a/pcbnew/router/pns_kicad_iface.h
++++ b/pcbnew/router/pns_kicad_iface.h
+@@ -52,7 +52,7 @@ class PNS_KICAD_IFACE_BASE : public PNS::ROUTER_IFACE
+ {
+ public:
+     PNS_KICAD_IFACE_BASE();
+-    ~PNS_KICAD_IFACE_BASE();
++    ~PNS_KICAD_IFACE_BASE() override;
+ 
+     void EraseView() override {};
+     void SetBoard( BOARD* aBoard );
+@@ -115,7 +115,7 @@ class PNS_KICAD_IFACE : public PNS_KICAD_IFACE_BASE
+ {
+ public:
+     PNS_KICAD_IFACE();
+-    ~PNS_KICAD_IFACE();
++    ~PNS_KICAD_IFACE() override;
+ 
+     virtual void SetHostTool( PCB_TOOL_BASE* aTool );
+ 
+diff --git a/pcbnew/router/pns_optimizer.cpp b/pcbnew/router/pns_optimizer.cpp
+index f83b42799..19931d55a 100644
+--- a/pcbnew/router/pns_optimizer.cpp
++++ b/pcbnew/router/pns_optimizer.cpp
+@@ -120,6 +120,10 @@ OPTIMIZER::OPTIMIZER( NODE* aWorld ) :
+ 
+ OPTIMIZER::~OPTIMIZER()
+ {
++    for( OPT_CONSTRAINT* c : m_constraints )
++        delete c;
++
++    m_constraints.clear();
+ }
+ 
+ 
+@@ -417,16 +421,7 @@ bool OPTIMIZER::checkColliding( ITEM* aItem, bool aUpdateCache )
+ }
+ 
+ 
+-void OPTIMIZER::ClearConstraints()
+-{
+-    for( OPT_CONSTRAINT* c : m_constraints )
+-        delete c;
+-
+-    m_constraints.clear();
+-}
+-
+-
+-void OPTIMIZER::AddConstraint ( OPT_CONSTRAINT *aConstraint )
++void OPTIMIZER::addConstraint ( OPT_CONSTRAINT *aConstraint )
+ {
+     m_constraints.push_back( aConstraint );
+ }
+@@ -633,20 +628,20 @@ bool OPTIMIZER::Optimize( LINE* aLine, LINE* aResult, LINE* aRoot )
+                  wxString::Format( "opt limit-corner-count root %d maxc %d mask %x",
+                                    rootObtuseCorners, aLine->SegmentCount(), angleMask ) );
+ 
+-        AddConstraint( c );
++        addConstraint( c );
+     }
+ 
+     if( m_effortLevel & PRESERVE_VERTEX )
+     {
+         auto c = new PRESERVE_VERTEX_CONSTRAINT( m_world, m_preservedVertex );
+-        AddConstraint( c );
++        addConstraint( c );
+     }
+ 
+     if( m_effortLevel & RESTRICT_VERTEX_RANGE )
+     {
+         auto c = new RESTRICT_VERTEX_RANGE_CONSTRAINT( m_world, m_restrictedVertexRange.first,
+                                                        m_restrictedVertexRange.second );
+-        AddConstraint( c );
++        addConstraint( c );
+     }
+ 
+     if( m_effortLevel & RESTRICT_AREA )
+@@ -654,13 +649,13 @@ bool OPTIMIZER::Optimize( LINE* aLine, LINE* aResult, LINE* aRoot )
+         auto c = new AREA_CONSTRAINT( m_world, m_restrictArea, m_restrictAreaIsStrict );
+         SHAPE_RECT r( m_restrictArea );
+         PNS_DBG( dbg, AddShape, &r, YELLOW, 0, wxT( "area-constraint" ) );
+-        AddConstraint( c );
++        addConstraint( c );
+     }
+ 
+     if( m_effortLevel & KEEP_TOPOLOGY )
+     {
+         auto c = new KEEP_TOPOLOGY_CONSTRAINT( m_world );
+-        AddConstraint( c );
++        addConstraint( c );
+     }
+ 
+     // TODO: Fix for arcs
+diff --git a/pcbnew/router/pns_optimizer.h b/pcbnew/router/pns_optimizer.h
+index a05ceeab5..6ff751491 100644
+--- a/pcbnew/router/pns_optimizer.h
++++ b/pcbnew/router/pns_optimizer.h
+@@ -153,9 +153,6 @@ public:
+         m_restrictAreaIsStrict = aStrict;
+     }
+ 
+-    void ClearConstraints();
+-    void AddConstraint ( OPT_CONSTRAINT *aConstraint );
+-
+ private:
+     static const int MaxCachedItems = 256;
+ 
+@@ -169,6 +166,8 @@ private:
+         bool m_isStatic;
+     };
+ 
++
++    void addConstraint ( OPT_CONSTRAINT *aConstraint );
+     bool mergeObtuse( LINE* aLine );
+     bool mergeFull( LINE* aLine );
+     bool mergeColinear( LINE* aLine );
+-- 
+2.43.0
+

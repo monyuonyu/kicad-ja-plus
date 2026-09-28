@@ -1,0 +1,28 @@
+From fd502efffb999039ff07edee80780d6f6c3e09bf Mon Sep 17 00:00:00 2001
+From: Tomasz Wlostowski <tomasz.wlostowski@cern.ch>
+Date: Wed, 28 Aug 2024 17:46:27 +0200
+Subject: [PATCH] router: ensure rebuildJoint() does not leave dangling root
+ node (with incorrect links) joint in case the (overridden) joint has same
+ hash value but different linked items. Probably the oldest bug in P&S, I
+ can't stop wondering how it had worked reasonably well for so many years :D
+
+---
+ pcbnew/router/pns_node.cpp | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/pcbnew/router/pns_node.cpp b/pcbnew/router/pns_node.cpp
+index 7b14c37f1..c57fc14b8 100644
+--- a/pcbnew/router/pns_node.cpp
++++ b/pcbnew/router/pns_node.cpp
+@@ -817,6 +817,8 @@ void NODE::rebuildJoint( const JOINT* aJoint, const ITEM* aItem )
+     {
+         if( link != aItem )
+             linkJoint( tag.pos, link->Layers(), net, link );
++        else
++            unlinkJoint( tag.pos, link->Layers(), net, link );
+     }
+ }
+ 
+-- 
+2.43.0
+

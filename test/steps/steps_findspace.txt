@@ -1,0 +1,5 @@
+# 置ける場所を探してから少しずらす
+info R19
+findspace R19 0.25
+drag R19 1,0
+check

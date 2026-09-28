@@ -1,0 +1,26 @@
+From 78fc95fd6df04e61a2eb2982d2eabc7451458cf8 Mon Sep 17 00:00:00 2001
+From: Tomasz Wlostowski <tomasz.wlostowski@cern.ch>
+Date: Mon, 24 Feb 2025 23:45:18 +0100
+Subject: [PATCH] router: fix regression in post-shove optimization
+
+Note to self: we keep track of the formerly pushed vias in the line stack, but pruning one from the optimizer queue should not prune the lines attached to it.
+---
+ pcbnew/router/pns_shove.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/pcbnew/router/pns_shove.cpp b/pcbnew/router/pns_shove.cpp
+index 2808752f4..852b2787d 100644
+--- a/pcbnew/router/pns_shove.cpp
++++ b/pcbnew/router/pns_shove.cpp
+@@ -1432,7 +1432,7 @@ void SHOVE::unwindLineStack( const LINKED_ITEM* aSeg )
+ 
+     for( std::vector<LINE>::iterator i = m_optimizerQueue.begin(); i != m_optimizerQueue.end() ; )
+     {
+-        if( i->ContainsLink( aSeg ) )
++        if( i->ContainsLink( aSeg ) && !aSeg->OfKind( ITEM::VIA_T ) )
+             i = m_optimizerQueue.erase( i );
+         else
+             i++;
+-- 
+2.43.0
+

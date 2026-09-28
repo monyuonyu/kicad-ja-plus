@@ -1,0 +1,8 @@
+# 3 本のネットの配線を外し、自動配線で引き直す
+unroute R10.2
+unroute R9.2
+unroute R14.2
+autoroute R10.2 C5.1
+autoroute R9.2 D8.2
+autoroute R14.2 D9.2
+check

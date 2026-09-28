@@ -1,0 +1,7 @@
+#!/bin/bash
+# ガーバー/ドリルの情報と差分(ソース: ~/src/kicad-8.0.9/gerbview/kicad_gerber_main.cpp)
+# このリポジトリの場所(道具と試験を探す)と、修正版 KiCad をビルドした場所
+KICAD_LOCAL_HOME=${KICAD_LOCAL_HOME:-$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)}
+KICAD_LOCAL_BUILD=${KICAD_LOCAL_BUILD:-$HOME/src/build-8.0.9}
+export KICAD_LOCAL_HOME KICAD_LOCAL_BUILD
+exec "$KICAD_LOCAL_BUILD/gerbview/kicad_gerber" "$@"

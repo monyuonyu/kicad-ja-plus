@@ -1,0 +1,53 @@
+# KiCad 8.0.9 に改良を当ててビルドし、回帰試験を流す
+name: Build and test
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          # 部品ライブラリと、比べるための kicad-cli はシステムの KiCad 8（24.04 の標準は 7 なので PPA から）
+          sudo add-apt-repository -y ppa:kicad/kicad-8.0-releases
+          sudo apt-get update
+          sudo apt-get install -y $(cat patches/notes/builddeps.txt) kicad ccache \
+            python3-numpy python3-matplotlib python3-pil fonts-ipaexfont-gothic
+
+      - name: Get KiCad 8.0.9 and apply the patches
+        run: ./apply.sh "$HOME/src/kicad-8.0.9"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ hashFiles('patches/ALL-combined.patch') }}
+          restore-keys: ccache-
+
+      - name: Configure
+        run: |
+          cmake -S "$HOME/src/kicad-8.0.9" -B "$HOME/src/build-8.0.9" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DKICAD_BUILD_PNS_DEBUG_TOOL=ON -DKICAD_SCRIPTING_WXPYTHON=OFF -DKICAD_BUILD_I18N=OFF
+
+      - name: Build
+        run: |
+          ninja -C "$HOME/src/build-8.0.9" -j4 kicad-cli pcbnew_kiface eeschema_kiface cvpcb_kiface \
+            kicad_route kicad_gerber pcbnew/_pcbnew.so s3d_plugin_vrml s3d_plugin_oce s3d_plugin_idf
+
+      - name: Regression test
+        run: |
+          export PATH="$PWD/bin:$PATH"
+          test/regress.sh
+
+      - name: Keep the test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regress-now
+          path: test/now/
+          if-no-files-found: ignore
