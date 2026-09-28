@@ -17,7 +17,7 @@ jobs:
           sudo add-apt-repository -y ppa:kicad/kicad-8.0-releases
           sudo apt-get update
           sudo apt-get install -y $(cat patches/notes/builddeps.txt) kicad ccache \
-            python3-numpy python3-matplotlib python3-pil fonts-ipaexfont-gothic
+            python3-numpy python3-matplotlib python3-pil fonts-ipaexfont-gothic xvfb
 
       - name: Get KiCad 8.0.9 and apply the patches
         run: ./apply.sh "$HOME/src/kicad-8.0.9"
@@ -42,7 +42,8 @@ jobs:
       - name: Regression test
         run: |
           export PATH="$PWD/bin:$PATH"
-          test/regress.sh
+          # 8.0.9 の kicad_route と kicad_gerber は起動時に GTK を初期化するので、画面の無い所では仮想の画面が要る
+          xvfb-run -a test/regress.sh
 
       - name: Keep the test output
         if: always()
