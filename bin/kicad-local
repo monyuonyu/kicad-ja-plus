@@ -26,6 +26,8 @@ kicad-local: 修正版 KiCad 8.0.9 の道具をまとめた入口(保存形式�
                                                 2D の図を注釈つきで画像に(選んだネットを強調・DRC の違反に番号)
   kicad-local autoroute <入力> <出力> [--passes 20] [--rip-up]
                                                 基板全体を Freerouting で自動配線し、ベタを塗り直して DRC まで
+  kicad-local finish outline|zone|stitch|islands|widen|fill <入力> <出力> ...
+                                                仕上げ(外形・ベタ・スティッチングビア・島の除去・電流から配線を太く)
   kicad-local erc <回路図.kicad_sch> [--json]  ERC を回して要点を表示。要確認があれば終了コード 1
   kicad-local lint <回路図.kicad_sch>          設計の定石からの外れを点検(外部の線の保護・ベース抵抗・
                                                 TVS/電解の向き・電源の入出力コンデンサ・つなぎ忘れ)
@@ -114,6 +116,7 @@ case "$cmd" in
   why) exec kicad-python "$KICAD_LOCAL_HOME/tools/kwhy.py" "$@" ;;
   view) exec kicad-python "$KICAD_LOCAL_HOME/tools/kview.py" "$@" ;;
   autoroute) exec kicad-python "$KICAD_LOCAL_HOME/tools/kautoroute.py" "$@" ;;
+  finish) exec kicad-python "$KICAD_LOCAL_HOME/tools/kfinish.py" "$@" ;;
   erc) exec python3 "$KICAD_LOCAL_HOME/tools/kerc.py" "$@" ;;
   render)
     b=$1; view=${2:-iso}; out=${3:-"${b%.kicad_pcb}_${view}.png"}

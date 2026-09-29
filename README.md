@@ -27,6 +27,8 @@ kicad-local stats 基板.kicad_pcb           # 部品数・穴径など
 kicad-local drc 基板.kicad_pcb --strict    # DRC が「違反 0」でも見逃す 3 つ（ネットの無いパッド・ネットクラスより細い配線・古いベタ）も
 kicad-local why 基板.kicad_pcb             # 未配線の組ごとに「なぜ引けないか」（キープアウト・ほかのネットの銅・外形）を層ごとに
 kicad-local view 基板.kicad_pcb --drc --net GND   # 2D の図を注釈つきで画像に（ネットの強調・DRC の違反に番号）
+kicad-local autoroute 入力.kicad_pcb 出力.kicad_pcb   # 基板全体を Freerouting で自動配線し、ベタの塗り直しと DRC まで
+kicad-local finish outline|zone|stitch|islands|widen 入力 出力 ...   # 外形・ベタ・スティッチングビア・島の除去・電流から配線を太く
 
 # 部品を動かし、配線する（手順は標準入力でも可）
 kicad-local route 基板.kicad_pcb 出力.kicad_pcb - --instructions 手順.md <<'EOF'
@@ -44,7 +46,7 @@ kicad-local review 新しい版 前の版 --out 確認/        # ERC・DRC・3D�
 ```
 
 `--instructions` を付けると、同じ操作を KiCad の画面で人が再現できる手順書も出ます。
-**AI やスクリプトから使う**: drc・erc・why・view・stats は `--json` で機械が読める形を出し、drc・erc・why は要確認があれば
+**AI やスクリプトから使う**: drc・erc・why・view・stats・autoroute・finish は `--json` で機械が読める形を出し、drc・erc・why は要確認があれば
 終了コード 1 を返します（文章を読み解かなくても、結果で次の判断ができる）。10.0.6 版は画面（DISPLAY）が無くても動きます。
 詳しい使い方は [docs/guide.md](docs/guide.md)、道具は [tools/README.md](tools/README.md)、回路の計算は [tools/ksim/README.md](tools/ksim/README.md)。
 

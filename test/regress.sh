@@ -95,6 +95,10 @@ if [ -n "$fr_jar" ]; then
 else
   echo "  --  kicad-local autoroute: Freerouting が無いので飛ばした（FREEROUTING_JAR で指定できる）"
 fi
+# 仕上げ: ベタと外形を消した基板に、外形 → GND のベタ → スティッチングビア。未配線 0、クリアランス・穴の違反なし
+kicad-python -c "import pcbnew; b=pcbnew.LoadBoard('in.kicad_pcb'); [b.Remove(z) for z in list(b.Zones())]; [b.Remove(d) for d in list(b.GetDrawings()) if d.GetLayer()==pcbnew.Edge_Cuts]; b.Save('now/bare.kicad_pcb')" >/dev/null 2>&1
+cp in.kicad_pro now/bare.kicad_pro
+chk "kicad-local finish(外形 → ベタ → スティッチングビア。未配線 0、違反なし)" "kicad-local finish outline now/bare.kicad_pcb now/fin1.kicad_pcb --round 2 >/dev/null && kicad-local finish zone now/fin1.kicad_pcb now/fin2.kicad_pcb --net GND >/dev/null && kicad-local finish stitch now/fin2.kicad_pcb now/fin3.kicad_pcb --net GND --pitch 6 --json > now/stitch.json; kicad-local drc now/fin3.kicad_pcb --json > now/fin3.json; python3 -c \"import json; s=json.load(open('now/stitch.json')); d=json.load(open('now/fin3.json')); bad={v['type'] for v in d['violations']} & {'clearance','hole_to_hole','hole_clearance','via_diameter','drill_out_of_range','shorting_items'}; assert s['placed']>100 and not d['unconnected_items'] and not bad, (s, bad)\""
 chk "kicad-local lint(デモ回路図は要確認 0 件)" "kicad-local lint sch/interf_u.kicad_sch | grep -q '要確認'"
 
 # 終了コード: 配線の比較か道具の確認に NG が 1 つでもあれば 1（自動の試験が失敗を見逃さないように）
