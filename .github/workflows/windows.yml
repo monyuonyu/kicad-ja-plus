@@ -103,13 +103,30 @@ jobs:
           key: ccache-win-${{ inputs.kicad_version }}-${{ github.run_id }}
 
       - name: Install and collect the DLLs
+        timeout-minutes: 30
         run: |
           cmake --install build
-          # 実行に要る DLL（MSYS2 のもの）を bin に集める
-          for f in $STAGE/bin/*.exe $STAGE/bin/*.dll $STAGE/bin/*.kiface $STAGE/lib/kicad/plugins/3d/*.dll; do
-            [ -f "$f" ] || continue
-            ldd "$f" 2>/dev/null | awk '/ucrt64/ {print $3}'
-          done | sort -u | while read d; do cp -n "$d" $STAGE/bin/ 2>/dev/null || true; done
+          # 実行に要る DLL（MSYS2 のもの）を bin に集める。ldd は固まることがある（4 時間止まった）ので、
+          # objdump で各ファイルが読む DLL の名前を取り、$MINGW_PREFIX/bin にあるものを写す。写したものも同じように調べる
+          queue=$(ls $STAGE/bin/*.exe $STAGE/bin/*.dll $STAGE/bin/*.kiface $STAGE/lib/kicad/plugins/3d/*.dll 2>/dev/null)
+          declare -A seen
+          while [ -n "$queue" ]; do
+            next=""
+            for f in $queue; do
+              for d in $(timeout 30 objdump -p "$f" 2>/dev/null | awk '/DLL Name:/ {print $3}'); do
+                key=${d,,}
+                [ -n "${seen[$key]}" ] && continue
+                seen[$key]=1
+                src="$MINGW_PREFIX/bin/$d"
+                if [ -f "$src" ] && [ ! -f "$STAGE/bin/$d" ]; then
+                  cp "$src" "$STAGE/bin/"
+                  next="$next $STAGE/bin/$d"
+                fi
+              done
+            done
+            queue=$next
+          done
+          echo "集めた DLL: $(ls $STAGE/bin/*.dll | wc -l) 個"
           # Python（pcbnew のスクリプトと kicad-cli の一部が使う）
           pyver=$(python -c 'import sys;print(f"{sys.version_info[0]}.{sys.version_info[1]}")')
           mkdir -p $STAGE/lib && cp -r "$MINGW_PREFIX/lib/python$pyver" $STAGE/lib/ && rm -rf $STAGE/lib/python$pyver/test
