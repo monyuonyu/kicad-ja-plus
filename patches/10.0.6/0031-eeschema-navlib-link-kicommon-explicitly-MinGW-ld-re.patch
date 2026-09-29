@@ -1,0 +1,26 @@
+From 393c5a3859aa5af11742006edf2e0735b65414f2 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Tue, 29 Sep 2026 15:18:59 +0900
+Subject: [PATCH] eeschema navlib: link kicommon explicitly (MinGW ld resolves
+ static libs in order)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ eeschema/navlib/CMakeLists.txt | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/eeschema/navlib/CMakeLists.txt b/eeschema/navlib/CMakeLists.txt
+index f788c473..2ce181ea 100644
+--- a/eeschema/navlib/CMakeLists.txt
++++ b/eeschema/navlib/CMakeLists.txt
+@@ -21,6 +21,7 @@ target_include_directories(eeschema_navlib PRIVATE
+ )
+ target_link_libraries(eeschema_navlib
+     kiplatform # Needs kiplatform to check versioning
++    kicommon   # SafeNavlibInit (MinGW の ld は並び順で解決する)
+     $<TARGET_PROPERTY:3DxWare::Navlib,INTERFACE_LINK_LIBRARIES>
+     3DxWare::Navlib
+ )
+-- 
+2.43.0
+
