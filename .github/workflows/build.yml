@@ -33,6 +33,13 @@ jobs:
           sudo apt-get install -y $(cat ${{ matrix.deps }}) kicad ccache \
             python3-numpy python3-matplotlib python3-pil fonts-ipaexfont-gothic xvfb
 
+      - name: Prepare the KiCad settings
+        run: |
+          # KiCad を初めて起動したときと同じく、グローバルのライブラリ表を置く（kicad-cli は自分では作らない）
+          v=$(echo "${{ matrix.version }}" | cut -d. -f1).0
+          mkdir -p "$HOME/.config/kicad/$v"
+          cp /usr/share/kicad/template/sym-lib-table /usr/share/kicad/template/fp-lib-table "$HOME/.config/kicad/$v/" || true
+
       - name: Get KiCad and apply the patches
         run: ./apply.sh ${{ matrix.version }} "$HOME/src/kicad-${{ matrix.version }}"
 

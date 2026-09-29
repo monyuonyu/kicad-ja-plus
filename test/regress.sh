@@ -58,7 +58,11 @@ chk "kicad-cli-local pcb render" "kicad-cli-local pcb render --rotate -45,0,45 -
 chk "kicad-gerber diff(同じファイルは差なし)" "mkdir -p now/g && kicad-cli pcb export gerbers --layers F.Cu -o now/g/ in.kicad_pcb && kicad-gerber diff now/g/in-top_layer.gtl now/g/in-top_layer.gtl"
 chk "kicad-local review(基板だけでも ERC/DRC/3D のまとめが出る)" "kicad-local review in.kicad_pcb --out now/review >/dev/null; grep -q '| DRC |' now/review/報告.md"
 # ERC は元の回路図と同じ件数なら OK（KiCad 10 はデモの回路図にもともと指摘を出すため、0 件は求めない）
-sch_erc_before=$(python3 -c "import sys,pathlib,tempfile; sys.path.insert(0,'$KICAD_LOCAL_HOME/tools'); import review; print(review.erc(pathlib.Path('sch/interf_u.kicad_sch'), pathlib.Path(tempfile.mkdtemp()))[0])" 2>/dev/null)
+# 部品ライブラリの一覧（グローバルの sym-lib-table・fp-lib-table）が要る。無いと差し込んだ部品の分だけ
+# 「フットプリントが見つからない」が増える。
+# 比べるのは要確認の件数だけ（「参考」のライブラリの指摘は、グローバルのライブラリ表の有無で変わる）
+sch_erc_before=$(python3 -c "import sys,pathlib,tempfile; sys.path.insert(0,'$KICAD_LOCAL_HOME/tools'); import review; print(review.erc(pathlib.Path('sch/interf_u.kicad_sch'), pathlib.Path(tempfile.mkdtemp()))[0].split('、')[0])" 2>/dev/null)
+[ -n "$sch_erc_before" ] || sch_erc_before="(元の回路図の ERC を取れない)"
 chk "kicad-local sch(直列挿入で接続が 1 本増え、ERC は増えない)" "printf 'insert R99 1k Device:R at R4.1\n' | kicad-local sch sch/interf_u.kicad_sch now/sch_out.kicad_sch - > now/sch.log; grep -q '新しいネット \*\*Net-(D1-A)\*\*: D1.2 R99.2' now/sch.log && grep -qF -- \"--- ERC: $sch_erc_before\" now/sch.log"
 chk "基板の寄生インダクタンス(R10.2→C5.1 が 3.32nH)" "kicad-python $KICAD_LOCAL_HOME/tools/ksim/pcbpar.py in.kicad_pcb 'Net-(C5-Pad1)' R10.2 | grep -q 'C5.1 *L   3.32'"
 # 厳しい DRC: R10.1 のネットを外した基板で、ネットの無いパッドと、デモにもともとある細い配線(VCC_PIC 0.35mm)を見つけ、終了コード 1
