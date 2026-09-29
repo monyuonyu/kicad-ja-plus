@@ -15,7 +15,7 @@ ver=${3:-10.0.6}
 patchelf=${PATCHELF:-patchelf}
 command -v "$patchelf" >/dev/null || { echo "patchelf が無い（apt install patchelf か pip install patchelf）" >&2; exit 2; }
 
-name=kicad-ja-local-$ver-linux-x86_64
+name=kicad-ja-plus-$ver-linux-x86_64
 dst=$out/$name
 rm -rf "$dst"
 mkdir -p "$dst/build"

@@ -87,7 +87,7 @@ chk "kicad-local view(注釈つきの画像。未配線とキープアウトの�
 chk "kicad-local erc --json(要確認があれば終了コード 1)" "kicad-local erc sch/interf_u.kicad_sch --json > now/erc.json; rc=\$?; python3 -c \"import json,sys; d=json.load(open('now/erc.json')); sys.exit(0 if (rc:=int('\$rc'))==(0 if d['ok'] else 1) else 1)\""
 # 全体の自動配線（Freerouting が要る。無ければ飛ばす）: 配線を 1 本消した基板を引き直して未配線 0
 fr_jar=""
-for c in "${FREEROUTING_JAR:-}" ~/.local/share/kicad-ja-local/freerouting.jar ~/.local/share/freerouting/freerouting.jar ~/cad-mcp-lab/tools/freerouting/freerouting-2.4.1.jar; do
+for c in "${FREEROUTING_JAR:-}" ~/.local/share/kicad-ja-plus/freerouting.jar ~/.local/share/freerouting/freerouting.jar ~/cad-mcp-lab/tools/freerouting/freerouting-2.4.1.jar; do
   [ -n "$c" ] && [ -f "$c" ] && { fr_jar=$c; break; }
 done
 if [ -n "$fr_jar" ]; then

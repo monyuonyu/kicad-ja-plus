@@ -190,13 +190,13 @@ jobs:
 
       - name: Package (ZIP and installer)
         run: |
-          name="kicad-ja-local-${KV}-windows-x86_64"
+          name="kicad-ja-plus-${KV}-windows-x86_64"
           mkdir -p out
           (cd "$STAGE" && zip -qr "$GITHUB_WORKSPACE/out/$name.zip" .)
-          makensis -DVERSION="$KV" -DSTAGE="$(cygpath -w "$STAGE")" -DOUTFILE="$(cygpath -w "$GITHUB_WORKSPACE/out/$name-installer.exe")" installer/kicad-ja-local.nsi
+          makensis -DVERSION="$KV" -DSTAGE="$(cygpath -w "$STAGE")" -DOUTFILE="$(cygpath -w "$GITHUB_WORKSPACE/out/$name-installer.exe")" installer/kicad-ja-plus.nsi
           ls -la out
 
       - uses: actions/upload-artifact@v4
         with:
-          name: kicad-ja-local-${{ inputs.kicad_version }}-windows
+          name: kicad-ja-plus-${{ inputs.kicad_version }}-windows
           path: out/

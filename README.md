@@ -1,4 +1,4 @@
-# kicad-ja-local — 画面なしでも基板を扱える KiCad の改良版
+# kicad-ja-plus — 画面なしでも基板を扱える KiCad の改良版
 
 KiCad に、次のものを足したものです。版は 2 つあります。
 
@@ -90,8 +90,8 @@ Ubuntu 24.04（x86_64）向けの tar.gz を、リリースに置いています
 2. 好きな場所に展開して、`bin/` を PATH に入れる
 
    ```
-   tar xzf kicad-ja-local-10.0.6-linux-x86_64.tar.gz
-   export PATH="$PWD/kicad-ja-local-10.0.6-linux-x86_64/bin:$PATH"
+   tar xzf kicad-ja-plus-10.0.6-linux-x86_64.tar.gz
+   export PATH="$PWD/kicad-ja-plus-10.0.6-linux-x86_64/bin:$PATH"
    kicad-local help
    kicad-local test        # 回帰試験。全部 OK なら入れ方は正しい
    ```

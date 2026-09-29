@@ -1,4 +1,4 @@
-From c51affea7aad384bee22c1d4096602a4b6e6b7f6 Mon Sep 17 00:00:00 2001
+From 93c45905ab29a921168c82f0331f2c5185380952 Mon Sep 17 00:00:00 2001
 From: shota <monyuonyu@gmail.com>
 Date: Tue, 29 Sep 2026 16:22:50 +0900
 Subject: [PATCH] pcbnew: AI chat panel (Claude Agent SDK bridge over the IPC
@@ -298,7 +298,7 @@ index cbd76ca7..000dcad6 100644
  
 diff --git a/pcbnew/widgets/panel_ai_chat.cpp b/pcbnew/widgets/panel_ai_chat.cpp
 new file mode 100644
-index 00000000..0bbeb11d
+index 00000000..aa07a286
 --- /dev/null
 +++ b/pcbnew/widgets/panel_ai_chat.cpp
 @@ -0,0 +1,895 @@
@@ -373,13 +373,13 @@ index 00000000..0bbeb11d
 +    wxFileName fn;
 +#ifdef __WINDOWS__
 +    fn.AssignDir( envOr( wxS( "LOCALAPPDATA" ), wxGetHomeDir() ) );
-+    fn.AppendDir( wxS( "kicad-ja-local" ) );
++    fn.AppendDir( wxS( "kicad-ja-plus" ) );
 +    fn.AppendDir( wxS( "ai-venv" ) );
 +    fn.AppendDir( wxS( "Scripts" ) );
 +    fn.SetFullName( wxS( "python.exe" ) );
 +#else
 +    fn.AssignDir( envOr( wxS( "XDG_DATA_HOME" ), wxGetHomeDir() + wxS( "/.local/share" ) ) );
-+    fn.AppendDir( wxS( "kicad-ja-local" ) );
++    fn.AppendDir( wxS( "kicad-ja-plus" ) );
 +    fn.AppendDir( wxS( "ai-venv" ) );
 +    fn.AppendDir( wxS( "bin" ) );
 +    fn.SetFullName( wxS( "python" ) );
@@ -1328,7 +1328,7 @@ index 5ec2face..3582dec8 100644
 +    )
 diff --git a/scripting/kicad_ai/bridge.py b/scripting/kicad_ai/bridge.py
 new file mode 100644
-index 00000000..3563e27e
+index 00000000..2674a4a8
 --- /dev/null
 +++ b/scripting/kicad_ai/bridge.py
 @@ -0,0 +1,462 @@
@@ -1359,7 +1359,7 @@ index 00000000..3563e27e
 +
 +# API キーの置き場所: OS の鍵保管庫（Windows の資格情報マネージャー・macOS のキーチェーン・Linux の Secret Service）。
 +# 使えない環境（鍵保管庫の無い Linux など）では、本人だけが読めるファイル
-+KEY_SERVICE = "kicad-ja-local"
++KEY_SERVICE = "kicad-ja-plus"
 +KEY_USER = "anthropic-api-key"
 +
 +# 本人用: この環境変数に Claude の長期トークン（claude setup-token で発行）があれば、API キーの代わりに使う。
@@ -1748,8 +1748,8 @@ index 00000000..3563e27e
 +
 +def default_datadir():
 +    if sys.platform == "win32":
-+        return os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "kicad-ja-local")
-+    return os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "kicad-ja-local")
++        return os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "kicad-ja-plus")
++    return os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "kicad-ja-plus")
 +
 +
 +def main():
@@ -1888,14 +1888,14 @@ index 00000000..953430e0
 +    sys.exit(main())
 diff --git a/scripting/kicad_ai/setup_ai.py b/scripting/kicad_ai/setup_ai.py
 new file mode 100644
-index 00000000..0d203d5a
+index 00000000..20f6f61e
 --- /dev/null
 +++ b/scripting/kicad_ai/setup_ai.py
 @@ -0,0 +1,41 @@
 +"""KiCad の AI チャットの準備: 専用の Python の環境（venv）を作り、要るものを入れる
 +
 +使い方: python3 setup_ai.py [--venv 場所]
-+既定の場所: Linux ~/.local/share/kicad-ja-local/ai-venv、Windows %LOCALAPPDATA%\\kicad-ja-local\\ai-venv
++既定の場所: Linux ~/.local/share/kicad-ja-plus/ai-venv、Windows %LOCALAPPDATA%\\kicad-ja-plus\\ai-venv
 +（KiCad の AI チャットは、ここを既定で探す。別の場所にしたら KICAD_AI_PYTHON でその python を指す）
 +"""
 +
@@ -1913,7 +1913,7 @@ index 00000000..0d203d5a
 +        base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
 +    else:
 +        base = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
-+    return os.path.join(base, "kicad-ja-local", "ai-venv")
++    return os.path.join(base, "kicad-ja-plus", "ai-venv")
 +
 +
 +def main():

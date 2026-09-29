@@ -9,7 +9,7 @@
       ベタを塗り直す → 出力に保存（入力は変えない）→ 出力を DRC にかけ、未配線と新しく増えた違反を出す。
 
   --rip-up   既存の配線とビアを剥がしてから配線し直す（既定は、今ある配線を残して足りない所だけ）
-  --jar      Freerouting の jar（既定: 環境変数 FREEROUTING_JAR、~/.local/share/kicad-ja-local/freerouting.jar ほか）
+  --jar      Freerouting の jar（既定: 環境変数 FREEROUTING_JAR、~/.local/share/kicad-ja-plus/freerouting.jar ほか）
              入手先: https://github.com/freerouting/freerouting/releases （Java 21 以降が要る）
 
 終了コード: 0 = 未配線なし・新しい違反なし、1 = 残った、2 = 使い方の誤り・実行できない
@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pcbnew
 
-JARS = ["~/.local/share/kicad-ja-local/freerouting.jar", "~/.local/share/freerouting/freerouting.jar",
+JARS = ["~/.local/share/kicad-ja-plus/freerouting.jar", "~/.local/share/freerouting/freerouting.jar",
         "~/cad-mcp-lab/tools/freerouting/freerouting-2.4.1.jar"]
 NOISE = ("lib_footprint_mismatch", "lib_footprint_issues", "silk_edge_clearance", "silk_overlap", "silk_over_copper")
 

@@ -40,10 +40,10 @@ jobs:
 
       - name: Get Freerouting (for kicad-local autoroute)
         run: |
-          mkdir -p "$HOME/.local/share/kicad-ja-local"
-          curl -fsSL -o "$HOME/.local/share/kicad-ja-local/freerouting.jar" \
+          mkdir -p "$HOME/.local/share/kicad-ja-plus"
+          curl -fsSL -o "$HOME/.local/share/kicad-ja-plus/freerouting.jar" \
             https://github.com/freerouting/freerouting/releases/download/v2.4.1/freerouting-2.4.1.jar
-          echo "251101c3eeac22d7e7dfcf6796603279e5d1000283eb82d8f093780f7afc6aa9  $HOME/.local/share/kicad-ja-local/freerouting.jar" | sha256sum -c
+          echo "251101c3eeac22d7e7dfcf6796603279e5d1000283eb82d8f093780f7afc6aa9  $HOME/.local/share/kicad-ja-plus/freerouting.jar" | sha256sum -c
 
       - name: Prepare the KiCad settings
         run: |
@@ -93,11 +93,11 @@ jobs:
           # 展開した物だけで動くか（ビルドの場所を隠して、回帰試験をもう一度）
           mkdir -p /tmp/pkg && tar -C /tmp/pkg -xzf dist/*.tar.gz
           mv "$HOME/src/build-${{ matrix.version }}" "$HOME/src/build.hidden"
-          (cd /tmp/pkg/kicad-ja-local-* && env -u KICAD_LOCAL_BUILD test/regress.sh)
+          (cd /tmp/pkg/kicad-ja-plus-* && env -u KICAD_LOCAL_BUILD test/regress.sh)
           mv "$HOME/src/build.hidden" "$HOME/src/build-${{ matrix.version }}"
 
       - uses: actions/upload-artifact@v4
         if: matrix.version == '10.0.6'
         with:
-          name: kicad-ja-local-${{ matrix.version }}-linux-x86_64
+          name: kicad-ja-plus-${{ matrix.version }}-linux-x86_64
           path: dist/*.tar.gz
