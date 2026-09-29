@@ -62,21 +62,27 @@ jobs:
             patch -Np1 -i "../$p" || { echo "当たらない: $p"; exit 1; }
           done
 
-      - uses: actions/cache@v4
+      # ccache は失敗した回でも保存する（保存しないと、毎回 3 時間かけて全部を作り直す）
+      - uses: actions/cache/restore@v4
         with:
           path: .ccache
-          key: ccache-win-${{ inputs.kicad_version }}-${{ github.sha }}
+          key: ccache-win-${{ inputs.kicad_version }}-${{ github.run_id }}
           restore-keys: ccache-win-${{ inputs.kicad_version }}-
+
+      # インストール先は 1 つの Windows の場所（D:/a/.../stage の形）に決める。cmake（Windows のプログラム）は
+      # /stage を D:\stage と読み、bash は MSYS2 の中の /stage と読むので、/stage と書くと別々の場所になる
+      - name: Decide the install location
+        run: echo "STAGE=$(cygpath -m "$GITHUB_WORKSPACE/stage")" >> "$GITHUB_ENV"
 
       - name: Configure
         run: |
-          MSYS2_ARG_CONV_EXCL="-DCMAKE_INSTALL_PREFIX=;-DCMAKE_PREFIX_PATH=;-DDEFAULT_INSTALL_PATH=" \
+          MSYS2_ARG_CONV_EXCL="-DCMAKE_PREFIX_PATH=" \
           cmake -Wno-dev -G Ninja -S kicad -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_INSTALL_PREFIX=/stage \
+            -DCMAKE_INSTALL_PREFIX="$STAGE" \
             -DCMAKE_PREFIX_PATH="$MINGW_PREFIX" \
-            -DDEFAULT_INSTALL_PATH=/stage \
+            -DDEFAULT_INSTALL_PATH="$STAGE" \
             -DwxWidgets_CONFIG_EXECUTABLE="$MINGW_PREFIX/bin/wx-config-3.2" \
             -DOCC_INCLUDE_DIR="$MINGW_PREFIX/include/opencascade" \
             -DKICAD_SCRIPTING_WXPYTHON=OFF -DKICAD_BUILD_I18N=OFF -DKICAD_BUILD_QA_TESTS=OFF \
@@ -90,37 +96,47 @@ jobs:
           cmake --build build -j 4 -- -k 0
           ccache -s
 
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .ccache
+          key: ccache-win-${{ inputs.kicad_version }}-${{ github.run_id }}
+
       - name: Install and collect the DLLs
         run: |
           cmake --install build
           # 実行に要る DLL（MSYS2 のもの）を bin に集める
-          for f in /stage/bin/*.exe /stage/bin/*.dll /stage/bin/*.kiface /stage/lib/kicad/plugins/3d/*.dll; do
+          for f in $STAGE/bin/*.exe $STAGE/bin/*.dll $STAGE/bin/*.kiface $STAGE/lib/kicad/plugins/3d/*.dll; do
             [ -f "$f" ] || continue
             ldd "$f" 2>/dev/null | awk '/ucrt64/ {print $3}'
-          done | sort -u | while read d; do cp -n "$d" /stage/bin/ 2>/dev/null || true; done
+          done | sort -u | while read d; do cp -n "$d" $STAGE/bin/ 2>/dev/null || true; done
           # Python（pcbnew のスクリプトと kicad-cli の一部が使う）
           pyver=$(python -c 'import sys;print(f"{sys.version_info[0]}.{sys.version_info[1]}")')
-          mkdir -p /stage/lib && cp -r "$MINGW_PREFIX/lib/python$pyver" /stage/lib/ && rm -rf /stage/lib/python$pyver/test
+          mkdir -p $STAGE/lib && cp -r "$MINGW_PREFIX/lib/python$pyver" $STAGE/lib/ && rm -rf $STAGE/lib/python$pyver/test
           # 部品ライブラリ（シンボルとフットプリント。3D モデルは大きいので入れない）
-          mkdir -p /stage/share/kicad
-          cp -r "$MINGW_PREFIX/share/kicad/symbols" "$MINGW_PREFIX/share/kicad/footprints" /stage/share/kicad/ 2>/dev/null || true
-          du -sh /stage
+          mkdir -p $STAGE/share/kicad
+          cp -r "$MINGW_PREFIX/share/kicad/symbols" "$MINGW_PREFIX/share/kicad/footprints" $STAGE/share/kicad/ 2>/dev/null || true
+          du -sh "$STAGE"
 
       - name: Smoke test
         run: |
           cd kicad/demos/pic_programmer
-          /stage/bin/kicad-cli.exe version
-          /stage/bin/kicad-cli.exe pcb drc -o "$GITHUB_WORKSPACE/drc.rpt" pic_programmer.kicad_pcb || true
+          $STAGE/bin/kicad-cli.exe version
+          # 基板エディタの AI チャットの仲介役が入っていること
+          for f in bridge.py run_code.py setup_ai.py requirements.txt; do
+            test -f "$STAGE/share/kicad/scripting/kicad_ai/$f" || { echo "AI チャットのファイルが無い: $f"; exit 1; }
+          done
+          $STAGE/bin/kicad-cli.exe pcb drc -o "$GITHUB_WORKSPACE/drc.rpt" pic_programmer.kicad_pcb || true
           test -s "$GITHUB_WORKSPACE/drc.rpt" && head -5 "$GITHUB_WORKSPACE/drc.rpt"
-          /stage/bin/kicad-cli.exe pcb export stats -o "$GITHUB_WORKSPACE/stats.txt" pic_programmer.kicad_pcb
+          $STAGE/bin/kicad-cli.exe pcb export stats -o "$GITHUB_WORKSPACE/stats.txt" pic_programmer.kicad_pcb
           head -20 "$GITHUB_WORKSPACE/stats.txt"
 
       - name: Package (ZIP and installer)
         run: |
           name="kicad-ja-local-${KV}-windows-x86_64"
           mkdir -p out
-          (cd /stage && zip -qr "$GITHUB_WORKSPACE/out/$name.zip" .)
-          makensis -DVERSION="$KV" -DSTAGE="$(cygpath -w /stage)" -DOUTFILE="$(cygpath -w "$GITHUB_WORKSPACE/out/$name-installer.exe")" installer/kicad-ja-local.nsi
+          (cd "$STAGE" && zip -qr "$GITHUB_WORKSPACE/out/$name.zip" .)
+          makensis -DVERSION="$KV" -DSTAGE="$(cygpath -w "$STAGE")" -DOUTFILE="$(cygpath -w "$GITHUB_WORKSPACE/out/$name-installer.exe")" installer/kicad-ja-local.nsi
           ls -la out
 
       - uses: actions/upload-artifact@v4
