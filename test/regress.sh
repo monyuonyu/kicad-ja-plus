@@ -57,7 +57,9 @@ chk "kicad-cli-local pcb export stats" "kicad-cli-local pcb export stats -o now/
 chk "kicad-cli-local pcb render" "kicad-cli-local pcb render --rotate -45,0,45 -w 400 -h 300 -o now/r.png in.kicad_pcb && test -s now/r.png"
 chk "kicad-gerber diff(同じファイルは差なし)" "mkdir -p now/g && kicad-cli pcb export gerbers --layers F.Cu -o now/g/ in.kicad_pcb && kicad-gerber diff now/g/in-top_layer.gtl now/g/in-top_layer.gtl"
 chk "kicad-local review(基板だけでも ERC/DRC/3D のまとめが出る)" "kicad-local review in.kicad_pcb --out now/review >/dev/null; grep -q '| DRC |' now/review/報告.md"
-chk "kicad-local sch(直列挿入で接続が 1 本増え、ERC なし)" "printf 'insert R99 1k Device:R at R4.1\n' | kicad-local sch sch/interf_u.kicad_sch now/sch_out.kicad_sch - > now/sch.log; grep -q '新しいネット \*\*Net-(D1-A)\*\*: D1.2 R99.2' now/sch.log && grep -q 'ERC: 0 件' now/sch.log"
+# ERC は元の回路図と同じ件数なら OK（KiCad 10 はデモの回路図にもともと指摘を出すため、0 件は求めない）
+sch_erc_before=$(python3 -c "import sys,pathlib,tempfile; sys.path.insert(0,'$KICAD_LOCAL_HOME/tools'); import review; print(review.erc(pathlib.Path('sch/interf_u.kicad_sch'), pathlib.Path(tempfile.mkdtemp()))[0])" 2>/dev/null)
+chk "kicad-local sch(直列挿入で接続が 1 本増え、ERC は増えない)" "printf 'insert R99 1k Device:R at R4.1\n' | kicad-local sch sch/interf_u.kicad_sch now/sch_out.kicad_sch - > now/sch.log; grep -q '新しいネット \*\*Net-(D1-A)\*\*: D1.2 R99.2' now/sch.log && grep -qF -- \"--- ERC: $sch_erc_before\" now/sch.log"
 chk "基板の寄生インダクタンス(R10.2→C5.1 が 3.32nH)" "kicad-python $KICAD_LOCAL_HOME/tools/ksim/pcbpar.py in.kicad_pcb 'Net-(C5-Pad1)' R10.2 | grep -q 'C5.1 *L   3.32'"
 chk "kicad-local lint(デモ回路図は要確認 0 件)" "kicad-local lint sch/interf_u.kicad_sch | grep -q '要確認'"
 

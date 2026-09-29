@@ -32,19 +32,34 @@ def export_netlist(sch):
 
 
 def parse_netlist(text):
+    """kicad-cli の kicadsexpr ネットリストを読む。S 式として読むので、KiCad 8 の 1 行の書き方にも、
+    KiCad 10 の要素ごとに改行する書き方にも対応する"""
+    tools = str(Path(__file__).resolve().parent.parent)
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    import sx
+
+    def val(e, name):
+        x = sx.one(e, name)
+        return str(x[1]) if x is not None and len(x) > 1 else ""
+
+    root = sx.parse(text)
     comps = {}
-    for m in re.finditer(r'\(comp \(ref "([^"]+)"\)(.*?)(?=\n    \(comp |\n  \(libparts|\n  \)\n)', text, re.S):
-        ref, blk = m.group(1), m.group(2)
-        val = re.search(r'\(value "([^"]*)"\)', blk)
-        lib = re.search(r'\(libsource \(lib "([^"]*)"\) \(part "([^"]*)"\)', blk)
-        fields = dict(re.findall(r'\(field \(name "([^"]*)"\) "([^"]*)"\)', blk))
-        fp = re.search(r'\(footprint "([^"]*)"\)', blk)
-        comps[ref] = {"ref": ref, "value": val.group(1) if val else "", "footprint": fp.group(1) if fp else "",
-                      "lib": f"{lib.group(1)}:{lib.group(2)}" if lib else "", "fields": fields, "pins": {}}
+    for c in sx.find(sx.one(root, "components") or [], "comp"):
+        ref = val(c, "ref")
+        lib = sx.one(c, "libsource")
+        fields = {}
+        for f in sx.find(sx.one(c, "fields") or [], "field"):
+            name = val(f, "name")
+            vals = [x for x in f[1:] if not isinstance(x, list)]
+            fields[name] = str(vals[0]) if vals else ""
+        comps[ref] = {"ref": ref, "value": val(c, "value"), "footprint": val(c, "footprint"),
+                      "lib": f"{val(lib, 'lib')}:{val(lib, 'part')}" if lib is not None else "",
+                      "fields": fields, "pins": {}}
     nets = {}
-    for m in re.finditer(r'\(net \(code "\d+"\) \(name "([^"]*)"\)(.*?)(?=\n    \(net |\n  \)|\Z)', text, re.S):
-        name = m.group(1)
-        raw = re.findall(r'\(node \(ref "([^"]+)"\) \(pin "([^"]+)"\)(?: \(pinfunction "([^"]*)"\))?(?: \(pintype "([^"]*)"\))?', m.group(2))
+    for n in sx.find(sx.one(root, "nets") or [], "net"):
+        name = val(n, "name")
+        raw = [(val(d, "ref"), val(d, "pin"), val(d, "pinfunction"), val(d, "pintype")) for d in sx.find(n, "node")]
         nets[name] = [(r, p, f) for r, p, f, _ in raw]
         for ref, pin, fn, pt in raw:
             if ref in comps:

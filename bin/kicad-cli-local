@@ -8,7 +8,15 @@ KICAD_LOCAL_BUILD=${KICAD_LOCAL_BUILD:-$HOME/src/build-8.0.9}
 export KICAD_LOCAL_HOME KICAD_LOCAL_BUILD
 export KICAD_RUN_FROM_BUILD_DIR=1
 export KICAD8_FOOTPRINT_DIR=/usr/share/kicad/footprints
+export KICAD9_FOOTPRINT_DIR=/usr/share/kicad/footprints
+export KICAD10_FOOTPRINT_DIR=/usr/share/kicad/footprints
 export KICAD8_SYMBOL_DIR=/usr/share/kicad/symbols
+export KICAD9_SYMBOL_DIR=/usr/share/kicad/symbols
+export KICAD10_SYMBOL_DIR=/usr/share/kicad/symbols
 export KICAD8_3DMODEL_DIR=/usr/share/kicad/3dmodels
+export KICAD9_3DMODEL_DIR=/usr/share/kicad/3dmodels
+export KICAD10_3DMODEL_DIR=/usr/share/kicad/3dmodels
 export KICAD8_TEMPLATE_DIR=/usr/share/kicad/template
+export KICAD9_TEMPLATE_DIR=/usr/share/kicad/template
+export KICAD10_TEMPLATE_DIR=/usr/share/kicad/template
 exec "$KICAD_LOCAL_BUILD/kicad/kicad-cli" "$@"
