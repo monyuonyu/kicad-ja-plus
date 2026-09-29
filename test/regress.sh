@@ -74,6 +74,9 @@ open("now/netless.kicad_pcb", "w").write(sx.dump(b) + "\n")
 PY
 cp in.kicad_pro now/netless.kicad_pro
 chk "kicad-local drc --strict(ネットの無いパッドと、ネットクラスより細い配線を見つける)" "kicad-local drc now/netless.kicad_pcb --strict --json > now/strict.json; test \$? -eq 1 && python3 -c \"import json; d=json.load(open('now/strict.json')); k={(s['kind'], s.get('ref',''), s.get('pad',''), s.get('net','')) for s in d['strict']}; assert ('netless_pad','R10','1','') in k; assert any(x[0]=='narrow_track' and x[3]=='/pic_sockets/VCC_PIC' for x in k)\""
+# 引けない理由: 配線禁止の区域で塞いだ組を「すべての層をキープアウトが塞いでいる」と見分ける
+kicad-python tests/make_keepout.py in.kicad_pcb now/keepout.kicad_pcb >/dev/null 2>&1; cp in.kicad_pro now/keepout.kicad_pro
+chk "kicad-local why(キープアウトが塞いでいると見分ける)" "kicad-local why now/keepout.kicad_pcb --json > now/why.json; test \$? -eq 1 && python3 -c \"import json; d=json.load(open('now/why.json')); r=d['diagnosed'][0]; assert r['net']=='Net-(C5-Pad1)' and r['main_cause']==['keepout'], r\""
 chk "kicad-local lint(デモ回路図は要確認 0 件)" "kicad-local lint sch/interf_u.kicad_sch | grep -q '要確認'"
 
 # 終了コード: 配線の比較か道具の確認に NG が 1 つでもあれば 1（自動の試験が失敗を見逃さないように）
