@@ -22,12 +22,14 @@ kicad-local: 修正版 KiCad 8.0.9 の道具をまとめた入口(保存形式�
                                                 細い配線・古いベタ)も調べる。--json で機械が読む形
   kicad-local why <基板.kicad_pcb> [--json]     未配線の組ごとに「なぜ引けないか」(キープアウト・ほかのネットの
                                                 銅・基板の外形)を層ごとに調べる
-  kicad-local erc <回路図.kicad_sch>           ERC を回して要点を表示
+  kicad-local view <基板> [-o 出力.png] [--net 名前] [--drc] [--ref] [--region x0,y0,x1,y1]
+                                                2D の図を注釈つきで画像に(選んだネットを強調・DRC の違反に番号)
+  kicad-local erc <回路図.kicad_sch> [--json]  ERC を回して要点を表示。要確認があれば終了コード 1
   kicad-local lint <回路図.kicad_sch>          設計の定石からの外れを点検(外部の線の保護・ベース抵抗・
                                                 TVS/電解の向き・電源の入出力コンデンサ・つなぎ忘れ)
   kicad-local render <基板> [top|bottom|iso|iso-hq] [出力.png]
                                                 3D 画像(既定 iso → <基板名>_iso.png)
-  kicad-local stats <基板>                      基板の統計(部品・パッド・穴径・面積など)
+  kicad-local stats <基板> [--json]             基板の統計(部品・パッド・穴径・面積など)
   kicad-local route <入力> <出力|-> <手順|-> [--instructions 指示書.md]
                                                 画面なしの配線・部品移動(命令は kicad-local route --help)
 
@@ -108,10 +110,8 @@ case "$cmd" in
   route) exec kicad-route "$@" ;;
   drc) exec python3 "$KICAD_LOCAL_HOME/tools/kdrc.py" "$@" ;;
   why) exec kicad-python "$KICAD_LOCAL_HOME/tools/kwhy.py" "$@" ;;
-  erc)
-    s=$1; [ -f "$s" ] || { echo "回路図がない: $s"; exit 2; }
-    t=$(mktemp -d); kicad-cli-local sch erc --format json -o "$t/erc.json" "$s" >/dev/null 2>&1
-    [ -f "$t/erc.json" ] && summarize "$t/erc.json"; rm -rf "$t" ;;
+  view) exec kicad-python "$KICAD_LOCAL_HOME/tools/kview.py" "$@" ;;
+  erc) exec python3 "$KICAD_LOCAL_HOME/tools/kerc.py" "$@" ;;
   render)
     b=$1; view=${2:-iso}; out=${3:-"${b%.kicad_pcb}_${view}.png"}
     case "$view" in
@@ -122,7 +122,14 @@ case "$cmd" in
     esac
     kicad-cli-local pcb render "${a[@]}" -w 1600 -h 1200 -o "$out" "$b" 2>&1 | grep -E "Successfully|Error|not supported" ; echo "→ $out" ;;
   stats)
-    b=$1; t=$(mktemp -d); kicad-cli-local pcb export stats -o "$t/s.txt" "$b" >/dev/null 2>&1 && sed -n '/^Board$/,$p' "$t/s.txt"; rm -rf "$t" ;;
+    b=$1; [ -f "$b" ] || { echo "基板がない: $b"; exit 2; }
+    t=$(mktemp -d)
+    if [ "$2" = "--json" ]; then
+      kicad-cli-local pcb export stats --format json -o "$t/s.json" "$b" >/dev/null 2>&1 && cat "$t/s.json"
+    else
+      kicad-cli-local pcb export stats -o "$t/s.txt" "$b" >/dev/null 2>&1 && sed -n '/^Board$/,$p' "$t/s.txt"
+    fi
+    rc=$?; rm -rf "$t"; exit $rc ;;
   gerber) exec kicad-gerber "$@" ;;
   pcbsync) exec kicad-python "$KICAD_LOCAL_HOME/tools/pcbsync.py" "$@" ;;
   silkfix) exec kicad-python "$KICAD_LOCAL_HOME/tools/silkfix.py" "$@" ;;

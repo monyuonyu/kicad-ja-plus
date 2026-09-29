@@ -77,6 +77,8 @@ chk "kicad-local drc --strict(ネットの無いパッドと、ネットクラ�
 # 引けない理由: 配線禁止の区域で塞いだ組を「すべての層をキープアウトが塞いでいる」と見分ける
 kicad-python tests/make_keepout.py in.kicad_pcb now/keepout.kicad_pcb >/dev/null 2>&1; cp in.kicad_pro now/keepout.kicad_pro
 chk "kicad-local why(キープアウトが塞いでいると見分ける)" "kicad-local why now/keepout.kicad_pcb --json > now/why.json; test \$? -eq 1 && python3 -c \"import json; d=json.load(open('now/why.json')); r=d['diagnosed'][0]; assert r['net']=='Net-(C5-Pad1)' and r['main_cause']==['keepout'], r\""
+chk "kicad-local view(注釈つきの画像。未配線とキープアウトの基板で印が付く)" "kicad-local view now/keepout.kicad_pcb -o now/view.png --drc --ref --net 'Net-(C5-Pad1)' --json > now/view.json && test -s now/view.png && python3 -c \"import json; d=json.load(open('now/view.json')); assert any(m['type']=='unconnected_items' for m in d['marks'])\""
+chk "kicad-local erc --json(要確認があれば終了コード 1)" "kicad-local erc sch/interf_u.kicad_sch --json > now/erc.json; rc=\$?; python3 -c \"import json,sys; d=json.load(open('now/erc.json')); sys.exit(0 if (rc:=int('\$rc'))==(0 if d['ok'] else 1) else 1)\""
 chk "kicad-local lint(デモ回路図は要確認 0 件)" "kicad-local lint sch/interf_u.kicad_sch | grep -q '要確認'"
 
 # 終了コード: 配線の比較か道具の確認に NG が 1 つでもあれば 1（自動の試験が失敗を見逃さないように）
