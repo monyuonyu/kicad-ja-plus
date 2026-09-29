@@ -58,7 +58,9 @@ kicad-local review 新しい版 前の版 --out 確認/        # ERC・DRC・3D�
   実行した変更は「元に戻す」1 回で戻せ、エラーになった回の変更は取り消されます。
 - DRC と画像は、基板の写しを保存して kicad-cli にかけます（開いている基板とファイルは変えません）。
 - 使うのは **ご自身の Anthropic の API キー** です。最初に聞かれ、OS の鍵保管庫（Windows の資格情報マネージャーなど）に保存されます。
-- 初めて開いたとき、専用の Python の環境（Claude Agent SDK と kicad-python）を作るかを聞かれます（Python 3.10 以降が要ります）。
+- **Windows 版は、AI 用の Python と Claude Agent SDK をインストーラーに同梱しています**（`<KiCad>/ai-runtime`）。準備もダウンロードも要りません
+  （AI との会話そのものには、インターネットが要ります）。
+- ソースからビルドしたときは、初めて開いたときに専用の Python の環境を作るかを聞かれます（Python 3.10 以降とインターネットが要ります）。
   手で準備するなら `python3 <KiCad の scripting>/kicad_ai/setup_ai.py`。
 - KiCad の API サーバーが止まっていれば、有効にするかを聞かれます（設定 → プラグイン と同じもの）。
 

@@ -118,6 +118,46 @@ jobs:
           cp -r "$MINGW_PREFIX/share/kicad/symbols" "$MINGW_PREFIX/share/kicad/footprints" $STAGE/share/kicad/ 2>/dev/null || true
           du -sh "$STAGE"
 
+      # 基板エディタの AI チャット用の Python を同梱する（インストールしてすぐ、ダウンロードなしで使える）。
+      # python.org の埋め込み用の Python に、requirements.txt の物（版は固定）を入れる。置き場は <KiCad>/ai-runtime
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Bundle the AI chat runtime
+        shell: pwsh
+        run: |
+          $ver = "3.14.7"
+          $rt = "$env:STAGE/ai-runtime"
+          $have = python -c "import sys;print('%d.%d' % sys.version_info[:2])"
+          if ($have -ne "3.14") { throw "pip を走らせる Python の版が違う: $have" }
+          Invoke-WebRequest "https://www.python.org/ftp/python/$ver/python-$ver-embed-amd64.zip" -OutFile embed.zip
+          Expand-Archive embed.zip -DestinationPath $rt
+          python -m pip install --disable-pip-version-check --no-compile --only-binary=:all: `
+            --target "$rt/Lib/site-packages" -r kicad/scripting/kicad_ai/requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw "pip install に失敗" }
+          # 埋め込み用の Python は ._pth に書いた場所しか見ないので、site-packages を足す
+          $pth = Get-ChildItem "$rt/python*._pth" | Select-Object -First 1
+          Add-Content $pth.FullName "Lib\site-packages"
+          & "$rt/python.exe" -c "import claude_agent_sdk, kipy, keyring; print('AI 用の Python:', claude_agent_sdk.__version__)"
+          if ($LASTEXITCODE -ne 0) { throw "同梱した Python で SDK を読み込めない" }
+          "{0:N0} MB" -f ((Get-ChildItem $rt -Recurse | Measure-Object Length -Sum).Sum / 1MB)
+
+      - name: Smoke test (AI chat bridge, offline parts only)
+        shell: pwsh
+        run: |
+          # 同梱の Python だけで仲介役が起動し、キーが無ければ「need_key」を返すこと（AI には接続しない）
+          $rt = "$env:STAGE/ai-runtime"
+          $bridge = "$env:STAGE/share/kicad/scripting/kicad_ai/bridge.py"
+          $env:PYTHON_KEYRING_BACKEND = "keyring.backends.fail.Keyring"
+          $out = "" | & "$rt/python.exe" $bridge --datadir "$env:RUNNER_TEMP/ai-data"
+          Write-Output $out
+          if (-not ($out -match '"need_key"')) { throw "仲介役が起動しない" }
+          # SDK に入っている claude が動くこと
+          $claude = Get-ChildItem "$rt/Lib/site-packages/claude_agent_sdk/_bundled/claude*.exe" | Select-Object -First 1
+          & $claude.FullName --version
+          if ($LASTEXITCODE -ne 0) { throw "同梱の claude が動かない" }
+
       - name: Smoke test
         run: |
           cd kicad/demos/pic_programmer

@@ -1,4 +1,4 @@
-From 50e840287501d8f9f7d9ba120486743a73a7b0e0 Mon Sep 17 00:00:00 2001
+From 50a09d5bb635e95f75e94eee2bd175ecbff5bf2c Mon Sep 17 00:00:00 2001
 From: shota <monyuonyu@gmail.com>
 Date: Tue, 29 Sep 2026 16:22:50 +0900
 Subject: [PATCH] pcbnew: AI chat panel (Claude Agent SDK bridge over the IPC
@@ -23,14 +23,14 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  pcbnew/tools/board_editor_control.h   |   1 +
  pcbnew/tools/pcb_actions.cpp          |   8 +
  pcbnew/tools/pcb_actions.h            |   1 +
- pcbnew/widgets/panel_ai_chat.cpp      | 871 ++++++++++++++++++++++++++
+ pcbnew/widgets/panel_ai_chat.cpp      | 895 ++++++++++++++++++++++++++
  pcbnew/widgets/panel_ai_chat.h        | 100 +++
  scripting/CMakeLists.txt              |  15 +
- scripting/kicad_ai/bridge.py          | 462 ++++++++++++++
- scripting/kicad_ai/requirements.txt   |   4 +
+ scripting/kicad_ai/bridge.py          | 462 +++++++++++++
+ scripting/kicad_ai/requirements.txt   |   5 +
  scripting/kicad_ai/run_code.py        |  75 +++
  scripting/kicad_ai/setup_ai.py        |  41 ++
- 16 files changed, 1636 insertions(+)
+ 16 files changed, 1661 insertions(+)
  create mode 100644 pcbnew/widgets/panel_ai_chat.cpp
  create mode 100644 pcbnew/widgets/panel_ai_chat.h
  create mode 100644 scripting/kicad_ai/bridge.py
@@ -298,10 +298,10 @@ index cbd76ca7..000dcad6 100644
  
 diff --git a/pcbnew/widgets/panel_ai_chat.cpp b/pcbnew/widgets/panel_ai_chat.cpp
 new file mode 100644
-index 00000000..3f47ff92
+index 00000000..98813712
 --- /dev/null
 +++ b/pcbnew/widgets/panel_ai_chat.cpp
-@@ -0,0 +1,871 @@
+@@ -0,0 +1,895 @@
 +/*
 + * This program source code file is part of KiCad, a free EDA CAD application.
 + *
@@ -338,6 +338,7 @@ index 00000000..3f47ff92
 +#include <wx/button.h>
 +#include <wx/dialog.h>
 +#include <wx/filename.h>
++#include <wx/stdpaths.h>
 +#include <wx/msgdlg.h>
 +#include <wx/process.h>
 +#include <wx/sizer.h>
@@ -382,6 +383,22 @@ index 00000000..3f47ff92
 +    fn.AppendDir( wxS( "ai-venv" ) );
 +    fn.AppendDir( wxS( "bin" ) );
 +    fn.SetFullName( wxS( "python" ) );
++#endif
++    return fn.GetFullPath();
++}
++
++
++/// インストーラーに同梱した AI 用の Python（<KiCad>/ai-runtime。準備なしで、オフラインでも入っている）
++static wxString bundledPython()
++{
++    wxFileName fn( wxStandardPaths::Get().GetExecutablePath() );
++    fn.RemoveLastDir();  // bin
++    fn.AppendDir( wxS( "ai-runtime" ) );
++#ifdef __WINDOWS__
++    fn.SetFullName( wxS( "python.exe" ) );
++#else
++    fn.AppendDir( wxS( "bin" ) );
++    fn.SetFullName( wxS( "python3" ) );
 +#endif
 +    return fn.GetFullPath();
 +}
@@ -680,7 +697,14 @@ index 00000000..3f47ff92
 +
 +wxString PANEL_AI_CHAT::pythonPath() const
 +{
-+    return envOr( wxS( "KICAD_AI_PYTHON" ), defaultVenvPython() );
++    // 指定 → 同梱の AI 用の Python → 自分で準備した環境 の順
++    if( !envOr( wxS( "KICAD_AI_PYTHON" ) ).IsEmpty() )
++        return envOr( wxS( "KICAD_AI_PYTHON" ) );
++
++    if( wxFileName::FileExists( bundledPython() ) )
++        return bundledPython();
++
++    return defaultVenvPython();
 +}
 +
 +
@@ -1772,14 +1796,15 @@ index 00000000..3563e27e
 +    main()
 diff --git a/scripting/kicad_ai/requirements.txt b/scripting/kicad_ai/requirements.txt
 new file mode 100644
-index 00000000..77f21ac0
+index 00000000..ff20472f
 --- /dev/null
 +++ b/scripting/kicad_ai/requirements.txt
-@@ -0,0 +1,4 @@
-+# KiCad の AI チャットが使うもの（setup_ai.py が入れる）
-+claude-agent-sdk>=0.2
-+kicad-python>=0.8,<0.9
-+keyring
+@@ -0,0 +1,5 @@
++# KiCad の AI チャットが使うもの（setup_ai.py と、Windows 版のインストーラーに同梱する AI 用の Python が入れる）
++# 版は固定する（どのビルドにも同じ物が入るように）。claude-agent-sdk は Windows 用がある版に合わせる
++claude-agent-sdk==0.2.159
++kicad-python==0.8.0
++keyring==25.7.0
 diff --git a/scripting/kicad_ai/run_code.py b/scripting/kicad_ai/run_code.py
 new file mode 100644
 index 00000000..953430e0
