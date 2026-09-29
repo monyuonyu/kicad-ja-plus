@@ -1,0 +1,3 @@
+# パッチは改行を変えない（Windows の取り出しで CRLF になると当たらない）
+*.patch -text
+*.diff -text
