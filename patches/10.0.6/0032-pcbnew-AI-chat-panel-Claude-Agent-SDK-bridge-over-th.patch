@@ -1,4 +1,4 @@
-From 010a3056809865e0cdb96595946a45fcb9a9ebc4 Mon Sep 17 00:00:00 2001
+From f8145092f8569e770d0943c0b79cea7db371052e Mon Sep 17 00:00:00 2001
 From: shota <monyuonyu@gmail.com>
 Date: Tue, 29 Sep 2026 16:22:50 +0900
 Subject: [PATCH] pcbnew: AI chat panel (Claude Agent SDK bridge over the IPC
@@ -23,14 +23,14 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  pcbnew/tools/board_editor_control.h   |   1 +
  pcbnew/tools/pcb_actions.cpp          |   8 +
  pcbnew/tools/pcb_actions.h            |   1 +
- pcbnew/widgets/panel_ai_chat.cpp      | 798 ++++++++++++++++++++++++++
- pcbnew/widgets/panel_ai_chat.h        |  95 +++
+ pcbnew/widgets/panel_ai_chat.cpp      | 871 ++++++++++++++++++++++++++
+ pcbnew/widgets/panel_ai_chat.h        | 100 +++
  scripting/CMakeLists.txt              |  15 +
- scripting/kicad_ai/bridge.py          | 436 ++++++++++++++
+ scripting/kicad_ai/bridge.py          | 447 +++++++++++++
  scripting/kicad_ai/requirements.txt   |   4 +
  scripting/kicad_ai/run_code.py        |  75 +++
  scripting/kicad_ai/setup_ai.py        |  41 ++
- 16 files changed, 1532 insertions(+)
+ 16 files changed, 1621 insertions(+)
  create mode 100644 pcbnew/widgets/panel_ai_chat.cpp
  create mode 100644 pcbnew/widgets/panel_ai_chat.h
  create mode 100644 scripting/kicad_ai/bridge.py
@@ -298,10 +298,10 @@ index cbd76ca7..000dcad6 100644
  
 diff --git a/pcbnew/widgets/panel_ai_chat.cpp b/pcbnew/widgets/panel_ai_chat.cpp
 new file mode 100644
-index 00000000..eb348035
+index 00000000..3f47ff92
 --- /dev/null
 +++ b/pcbnew/widgets/panel_ai_chat.cpp
-@@ -0,0 +1,798 @@
+@@ -0,0 +1,871 @@
 +/*
 + * This program source code file is part of KiCad, a free EDA CAD application.
 + *
@@ -440,7 +440,8 @@ index 00000000..eb348035
 +        m_pid( 0 ),
 +        m_timer( this ),
 +        m_ready( false ),
-+        m_busy( false )
++        m_busy( false ),
++        m_setupProcess( nullptr )
 +{
 +    wxBoxSizer* sizer = new wxBoxSizer( wxVERTICAL );
 +
@@ -482,6 +483,10 @@ index 00000000..eb348035
 +
 +PANEL_AI_CHAT::~PANEL_AI_CHAT()
 +{
++    // 準備が走っていたら、通知だけ外す（準備そのものは最後まで走らせ、wx が後片付けする）
++    if( m_setupProcess )
++        m_setupProcess->Unbind( wxEVT_END_PROCESS, &PANEL_AI_CHAT::onSetupEnd, this );
++
 +    stopBridge();
 +}
 +
@@ -655,7 +660,7 @@ index 00000000..eb348035
 +                                              "専用の Python の環境を作り、要るもの（Claude Agent SDK と "
 +                                              "kicad-python）をインターネットから入れます。数分かかります。\n\n"
 +                                              "場所: %s\n\n準備しますか？" ),
-+                                           wxFileName( pythonPath() ).GetPath() ),
++                                           venvDir() ),
 +                                   J( "AI チャット" ), wxYES_NO | wxICON_QUESTION, m_frame );
 +
 +        if( answer == wxYES )
@@ -676,6 +681,14 @@ index 00000000..eb348035
 +wxString PANEL_AI_CHAT::pythonPath() const
 +{
 +    return envOr( wxS( "KICAD_AI_PYTHON" ), defaultVenvPython() );
++}
++
++
++wxString PANEL_AI_CHAT::venvDir() const
++{
++    wxFileName fn( pythonPath() );
++    fn.RemoveLastDir();  // bin（Windows は Scripts）
++    return fn.GetPath();
 +}
 +
 +
@@ -732,26 +745,50 @@ index 00000000..eb348035
 +
 +    wxString cmd = wxString::Format( wxS( "%s \"%s\"" ), py, setup );
 +
++    // 数分かかるので、裏で走らせて出力をこの枠に流す（画面は止めない）
 +    append( ROLE::INFO, J( "準備しています（数分かかります）…" ) );
 +    m_status->SetLabel( J( "準備しています…" ) );
-+    wxBusyCursor busy;
++    m_sendButton->Enable( false );
 +
-+    wxArrayString out, err;
-+    long          code = wxExecute( cmd, out, err, wxEXEC_SYNC | wxEXEC_HIDE_CONSOLE );
++    wxExecuteEnv env;
++    wxGetEnvMap( &env.env );
++    env.env[wxS( "PYTHONUNBUFFERED" )] = wxS( "1" );
++    env.env[wxS( "PYTHONIOENCODING" )] = wxS( "utf-8" );
 +
-+    for( size_t i = out.size() > 5 ? out.size() - 5 : 0; i < out.size(); i++ )
-+        append( ROLE::TOOL, out[i] );
++    m_setupBuf.clear();
++    m_setupProcess = new wxProcess();  // 終わったら wx が消す
++    m_setupProcess->Redirect();
++    m_setupProcess->Bind( wxEVT_END_PROCESS, &PANEL_AI_CHAT::onSetupEnd, this );
++
++    if( wxExecute( cmd, wxEXEC_ASYNC | wxEXEC_HIDE_CONSOLE, m_setupProcess, &env ) <= 0 )
++    {
++        delete m_setupProcess;
++        m_setupProcess = nullptr;
++        m_sendButton->Enable( true );
++        append( ROLE::ERROR, wxString::Format( J( "準備を始められませんでした（%s）。" ), cmd ) );
++        return;
++    }
++
++    m_timer.Start( 200 );
++}
++
++
++void PANEL_AI_CHAT::onSetupEnd( wxProcessEvent& aEvent )
++{
++    readOutput();
++    m_setupProcess = nullptr;
++    aEvent.Skip();  // wxProcess は wx が消す
++
++    if( !m_process )
++        m_timer.Stop();
 +
 +    m_status->SetLabel( wxEmptyString );
++    m_sendButton->Enable( true );
 +
-+    if( code != 0 || !wxFileName::FileExists( pythonPath() ) )
++    if( aEvent.GetExitCode() != 0 || !wxFileName::FileExists( pythonPath() ) )
 +    {
-+        wxString tail;
-+
-+        for( size_t i = err.size() > 10 ? err.size() - 10 : 0; i < err.size(); i++ )
-+            tail << err[i] << wxS( "\n" );
-+
-+        append( ROLE::ERROR, wxString::Format( J( "準備に失敗しました（%s）。\n%s" ), cmd, tail ) );
++        append( ROLE::ERROR, wxString::Format( J( "準備に失敗しました（終了コード %d）。上の出力を見てください。" ),
++                                               aEvent.GetExitCode() ) );
 +        return;
 +    }
 +
@@ -850,6 +887,37 @@ index 00000000..eb348035
 +
 +void PANEL_AI_CHAT::readOutput()
 +{
++    if( m_setupProcess )
++    {
++        // 準備の出力（stdout と stderr）を行ごとに流す
++        for( wxInputStream* stream : { m_setupProcess->GetInputStream(), m_setupProcess->GetErrorStream() } )
++        {
++            char buf[4096];
++
++            while( stream && stream->CanRead() )
++            {
++                stream->Read( buf, sizeof( buf ) );
++
++                if( stream->LastRead() == 0 )
++                    break;
++
++                m_setupBuf.append( buf, stream->LastRead() );
++            }
++        }
++
++        size_t pos;
++
++        while( ( pos = m_setupBuf.find( '\n' ) ) != std::string::npos )
++        {
++            wxString line = wxString::FromUTF8( m_setupBuf.substr( 0, pos ) ).Trim();
++            m_setupBuf.erase( 0, pos + 1 );
++
++            // pip の細かい進み具合は出さない
++            if( !line.IsEmpty() && !line.StartsWith( wxS( "  " ) ) )
++                append( ROLE::TOOL, line );
++        }
++    }
++
 +    if( !m_process )
 +        return;
 +
@@ -934,6 +1002,13 @@ index 00000000..eb348035
 +        if( msg.contains( "error" ) && msg["error"].is_string() )
 +            append( ROLE::ERROR, wxString::Format( J( "エラー: %s" ), str( "error" ) ) );
 +    }
++    else if( type == "bad_key" )
++    {
++        append( ROLE::ERROR, J( "API キーが正しくありません。入れ直してください。" ) );
++        setBusy( false );
++        stopBridge();
++        askApiKey();
++    }
 +    else if( type == "need_key" )
 +    {
 +        stopBridge();
@@ -979,28 +1054,26 @@ index 00000000..eb348035
 +        return;
 +    }
 +
-+    // キーはコマンドラインに載せず、標準入力で渡す
-+    wxProcess* proc = new wxProcess();  // 終わったら wx が消す
-+    proc->Redirect();
-+    wxString cmd = wxString::Format( wxS( "\"%s\" \"%s\" --store-key" ), pythonPath(), bridgePath() );
-+    long     pid = wxExecute( cmd, wxEXEC_ASYNC | wxEXEC_HIDE_CONSOLE, proc );
++    // キーはコマンドラインに載せず、環境変数で渡す（この子プロセスにだけ）
++    wxExecuteEnv env;
++    wxGetEnvMap( &env.env );
++    env.env[wxS( "KICAD_AI_KEY_IN" )] = dlg.GetValue().Trim().Trim( false );
 +
-+    if( pid <= 0 )
++    wxString      cmd = wxString::Format( wxS( "\"%s\" \"%s\" --store-key" ), pythonPath(), bridgePath() );
++    wxArrayString out, err;
++    long          code;
++
 +    {
-+        delete proc;
-+        append( ROLE::ERROR, J( "API キーを保存できませんでした。" ) );
-+        return;
++        wxBusyCursor busy;
++        code = wxExecute( cmd, out, err, wxEXEC_SYNC | wxEXEC_HIDE_CONSOLE, &env );
 +    }
 +
-+    std::string key = dlg.GetValue().Trim().Trim( false ).ToStdString( wxConvUTF8 );
-+    proc->GetOutputStream()->Write( key.data(), key.size() );
-+    proc->CloseOutput();
-+
-+    // 保存が終わるのを待ってから、つなぎ直す
-+    wxBusyCursor busy;
-+
-+    for( int i = 0; i < 100 && wxProcess::Exists( pid ); i++ )
-+        wxMilliSleep( 100 );
++    if( code != 0 )
++    {
++        append( ROLE::ERROR, wxString::Format( J( "API キーを保存できませんでした。\n%s" ),
++                                               wxJoin( err, '\n', '\0' ) ) );
++        return;
++    }
 +
 +    append( ROLE::INFO, J( "API キーを保存しました。" ) );
 +    startBridge();
@@ -1102,10 +1175,10 @@ index 00000000..eb348035
 +}
 diff --git a/pcbnew/widgets/panel_ai_chat.h b/pcbnew/widgets/panel_ai_chat.h
 new file mode 100644
-index 00000000..3668d921
+index 00000000..7ccd306c
 --- /dev/null
 +++ b/pcbnew/widgets/panel_ai_chat.h
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,100 @@
 +/*
 + * This program source code file is part of KiCad, a free EDA CAD application.
 + *
@@ -1171,6 +1244,8 @@ index 00000000..3668d921
 +    void askApproval( int aId, const wxString& aDescription, const wxString& aCode );
 +    void askApiKey();
 +    void runSetup();
++    void onSetupEnd( wxProcessEvent& aEvent );
++    wxString venvDir() const;
 +
 +    wxString pythonPath() const;
 +    wxString bridgePath() const;
@@ -1198,6 +1273,9 @@ index 00000000..3668d921
 +    bool            m_ready;
 +    bool            m_busy;
 +    wxString        m_pending;      ///< 準備ができる前に送られた文
++
++    wxProcess*      m_setupProcess; ///< 準備（setup_ai.py）が走っている間だけ
++    std::string     m_setupBuf;
 +};
 +
 +#endif // PANEL_AI_CHAT_H
@@ -1226,10 +1304,10 @@ index 5ec2face..3582dec8 100644
 +    )
 diff --git a/scripting/kicad_ai/bridge.py b/scripting/kicad_ai/bridge.py
 new file mode 100644
-index 00000000..0b7a4aa3
+index 00000000..963a3469
 --- /dev/null
 +++ b/scripting/kicad_ai/bridge.py
-@@ -0,0 +1,436 @@
+@@ -0,0 +1,447 @@
 +"""KiCad の AI チャットの仲介役（KiCad の外の Python で動く。claude-agent-sdk と kicad-python が要る）
 +
 +KiCad（PANEL_AI_CHAT）とは標準入出力の JSON 行でやり取りする。
@@ -1575,19 +1653,29 @@ index 00000000..0b7a4aa3
 +    async def turn(self, s):
 +        self.busy = True
 +        error = None
++        said = []
 +        try:
 +            await self.client.query(s)
 +            async for m in self.client.receive_response():
 +                if isinstance(m, AssistantMessage):
 +                    for b in m.content:
 +                        if isinstance(b, TextBlock) and b.text.strip():
++                            said.append(b.text)
 +                            self.send(type="text", text=b.text)
 +                elif isinstance(m, ResultMessage) and m.is_error:
-+                    error = m.subtype or "error"
++                    # subtype は "success" のこともあるので、中身のある説明を選ぶ
++                    error = (getattr(m, "result", None) or "").strip() or \
++                        (m.subtype if m.subtype not in (None, "success") else "AI の回が失敗した")
 +        except Exception as e:
 +            error = "%s: %s" % (type(e).__name__, e)
 +        finally:
 +            self.busy = False
++        # キーが正しくない（401）: KiCad に入れ直してもらう
++        if error is not None and any("401" in t or "authenticate" in t.lower() for t in said + [error]):
++            self.send(type="bad_key")
++            error = None
++        elif error is not None and error in said:
++            error = None  # 同じ説明はもう出した
 +        self.send(type="done", error=error)
 +
 +    async def main(self):
@@ -1643,7 +1731,8 @@ index 00000000..0b7a4aa3
 +    ap.add_argument("--code-timeout", type=int, default=120)
 +    args = ap.parse_args()
 +    if args.store_key:
-+        key = sys.stdin.read().strip()
++        # キーは環境変数（KiCad から）か標準入力で受け取る。コマンドラインには載せない
++        key = (os.environ.pop("KICAD_AI_KEY_IN", "") or sys.stdin.read()).strip()
 +        if not key:
 +            sys.exit("キーが空")
 +        print(store_key(key, args.datadir))
