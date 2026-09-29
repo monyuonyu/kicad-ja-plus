@@ -1,7 +1,7 @@
 From 8b74ff49e2b2e9489582a81d866697e2fa781d1d Mon Sep 17 00:00:00 2001
 From: shota <monyuonyu@gmail.com>
 Date: Tue, 29 Sep 2026 07:36:07 +0900
-Subject: [PATCH 02/29] 04: drag: walk the attached tracks around obstacles (MR
+Subject: [PATCH 02/30] 04: drag: walk the attached tracks around obstacles (MR
  !2188)
 
 ---

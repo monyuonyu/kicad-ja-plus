@@ -1,7 +1,7 @@
 From 13ac3f762600abf62251c1845894f99c93530512 Mon Sep 17 00:00:00 2001
 From: shota <monyuonyu@gmail.com>
 Date: Tue, 29 Sep 2026 09:22:03 +0900
-Subject: [PATCH 27/29] 00/07: kicad_route, the push-and-shove router without a
+Subject: [PATCH 27/30] 00/07: kicad_route, the push-and-shove router without a
  GUI, ported to 10.0
 
 - runs without a display: a console app is registered before wxInitialize(), as in

@@ -1,7 +1,7 @@
 From 9df11dc5f27f6d9adacb9857241dc8d04fa66e7a Mon Sep 17 00:00:00 2001
 From: Petra Bernd <frosted.passers-3k@icloud.com>
 Date: Mon, 20 Apr 2026 20:09:23 -0700
-Subject: [PATCH 10/29] fix: match attrlist UNITS= to export unit setting
+Subject: [PATCH 10/30] fix: match attrlist UNITS= to export unit setting
 
 ---
  pcbnew/pcb_io/odbpp/odb_entity.cpp | 15 ++++++++++-----

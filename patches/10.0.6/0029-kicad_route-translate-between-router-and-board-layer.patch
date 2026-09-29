@@ -1,7 +1,7 @@
 From cca35f2070ffdc3c94ec0fe4cdd7898d9240e936 Mon Sep 17 00:00:00 2001
 From: shota <monyuonyu@gmail.com>
 Date: Tue, 29 Sep 2026 09:30:26 +0900
-Subject: [PATCH 29/29] kicad_route: translate between router and board layer
+Subject: [PATCH 29/30] kicad_route: translate between router and board layer
  numbers (they differ since 9.0)
 
 ---

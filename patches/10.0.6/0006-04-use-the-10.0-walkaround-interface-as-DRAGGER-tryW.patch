@@ -1,7 +1,7 @@
 From 57c70aa40bf5c7cddbbc1a328b9f7771b5fb293e Mon Sep 17 00:00:00 2001
 From: shota <monyuonyu@gmail.com>
 Date: Tue, 29 Sep 2026 08:25:25 +0900
-Subject: [PATCH 06/29] 04: use the 10.0 walkaround interface (as
+Subject: [PATCH 06/30] 04: use the 10.0 walkaround interface (as
  DRAGGER::tryWalkaround)
 
 ---

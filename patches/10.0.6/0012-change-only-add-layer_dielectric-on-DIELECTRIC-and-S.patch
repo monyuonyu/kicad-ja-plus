@@ -1,7 +1,7 @@
 From 88c5da81d88d9541662b6c5c8d9450bbc7f37cfa Mon Sep 17 00:00:00 2001
 From: Petra Bernd <frosted.passers-3k@icloud.com>
 Date: Mon, 20 Apr 2026 21:07:10 -0700
-Subject: [PATCH 12/29] change: only add layer_dielectric on DIELECTRIC and
+Subject: [PATCH 12/30] change: only add layer_dielectric on DIELECTRIC and
  SOLDERMASK layers
 
 ---

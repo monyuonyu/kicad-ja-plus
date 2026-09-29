@@ -1,7 +1,7 @@
 From 06efa57b740a999f4da9aa7b5c56d45e9572ccb6 Mon Sep 17 00:00:00 2001
 From: Victor Stoica <victorstoica114@gmail.com>
 Date: Tue, 29 Sep 2026 08:38:56 +0900
-Subject: [PATCH 23/29] pcbnew: use selected variant for schematic parity DRC
+Subject: [PATCH 23/30] pcbnew: use selected variant for schematic parity DRC
 
 From KiCad MR !2770 (https://gitlab.com/kicad/code/kicad/-/merge_requests/2770), ported to 10.0.6:
 the exclude_from_sim comparison (not in 10.0) and the test for issue 25119 (not in 10.0) are left out.

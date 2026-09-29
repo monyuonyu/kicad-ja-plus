@@ -1,0 +1,66 @@
+From fde15d7b06d56241c808b63c64d14ffbf647eb6f Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Tue, 29 Sep 2026 11:53:42 +0900
+Subject: [PATCH 30/30] Cadstar: undo the Windows LoadLibrary macro (MinGW
+ build of 10.0.6)
+
+---
+ pcbnew/pcb_io/cadstar/cadstar_pcb_archive_loader.cpp | 6 ++++++
+ pcbnew/pcb_io/cadstar/cadstar_pcb_archive_loader.h   | 6 ++++++
+ pcbnew/pcb_io/cadstar/pcb_io_cadstar_archive.cpp     | 6 ++++++
+ 3 files changed, 18 insertions(+)
+
+diff --git a/pcbnew/pcb_io/cadstar/cadstar_pcb_archive_loader.cpp b/pcbnew/pcb_io/cadstar/cadstar_pcb_archive_loader.cpp
+index fb41c6ab..665df793 100644
+--- a/pcbnew/pcb_io/cadstar/cadstar_pcb_archive_loader.cpp
++++ b/pcbnew/pcb_io/cadstar/cadstar_pcb_archive_loader.cpp
+@@ -48,6 +48,12 @@
+ 
+ #include <limits> // std::numeric_limits
+ 
++// <windows.h>, brought in by some of the headers above, renames LoadLibrary to LoadLibraryW:
++// undo it, or the member function below is declared and defined under different names (MinGW)
++#ifdef LoadLibrary
++#undef LoadLibrary
++#endif
++
+ 
+ void CADSTAR_PCB_ARCHIVE_LOADER::Load( BOARD* aBoard, PROJECT* aProject )
+ {
+diff --git a/pcbnew/pcb_io/cadstar/cadstar_pcb_archive_loader.h b/pcbnew/pcb_io/cadstar/cadstar_pcb_archive_loader.h
+index c9f3267e..1f5fc4ff 100644
+--- a/pcbnew/pcb_io/cadstar/cadstar_pcb_archive_loader.h
++++ b/pcbnew/pcb_io/cadstar/cadstar_pcb_archive_loader.h
+@@ -34,6 +34,12 @@
+ #include <memory>
+ #include <set>
+ 
++// <windows.h>, brought in by some of the headers above, renames LoadLibrary to LoadLibraryW:
++// undo it, or the member function below is declared and defined under different names (MinGW)
++#ifdef LoadLibrary
++#undef LoadLibrary
++#endif
++
+ class BOARD;
+ class BOARD_STACKUP_ITEM;
+ class PCB_DIMENSION_BASE;
+diff --git a/pcbnew/pcb_io/cadstar/pcb_io_cadstar_archive.cpp b/pcbnew/pcb_io/cadstar/pcb_io_cadstar_archive.cpp
+index 5a95ae18..4dac5450 100644
+--- a/pcbnew/pcb_io/cadstar/pcb_io_cadstar_archive.cpp
++++ b/pcbnew/pcb_io/cadstar/pcb_io_cadstar_archive.cpp
+@@ -32,6 +32,12 @@
+ #include <pcb_io/pcb_io.h>
+ #include <reporter.h>
+ 
++// <windows.h>, brought in by some of the headers above, renames LoadLibrary to LoadLibraryW:
++// undo it, or the member function below is declared and defined under different names (MinGW)
++#ifdef LoadLibrary
++#undef LoadLibrary
++#endif
++
+ 
+ std::map<wxString, PCB_LAYER_ID> PCB_IO_CADSTAR_ARCHIVE::DefaultLayerMappingCallback(
+         const std::vector<INPUT_LAYER_DESC>& aInputLayerDescriptionVector )
+-- 
+2.43.0
+

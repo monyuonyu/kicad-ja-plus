@@ -1,7 +1,7 @@
 From 153b12f9f17373239034a0f360be261f5bfef9fa Mon Sep 17 00:00:00 2001
 From: Francois Belanger <francois.belanger@solution-ice.com>
 Date: Tue, 29 Sep 2026 08:38:14 +0900
-Subject: [PATCH 22/29] 3d-viewer: fix 3 bugs found while creating a 3D board
+Subject: [PATCH 22/30] 3d-viewer: fix 3 bugs found while creating a 3D board
  editor
 
 From KiCad MR !2752 (https://gitlab.com/kicad/code/kicad/-/merge_requests/2752), ported to 10.0.6 (declaration re-wrapped).

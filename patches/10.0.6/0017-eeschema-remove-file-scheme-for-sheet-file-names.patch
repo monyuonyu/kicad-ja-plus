@@ -1,7 +1,7 @@
 From e9af2f54a4508f8200985f4587fee7b051198507 Mon Sep 17 00:00:00 2001
 From: RigoLigo <rigoligo03@gmail.com>
 Date: Sat, 16 May 2026 19:38:22 +0800
-Subject: [PATCH 17/29] eeschema: remove file:// scheme for sheet file names
+Subject: [PATCH 17/30] eeschema: remove file:// scheme for sheet file names
 
 Since 593a1f5, file paths chosen from file picker launched from grids are prepended with "file://". This breaks sheet path processing, raising false invaldi file name warnings on Windows stable and also breaks nightly. This commit removed "file://" scheme prefix for sheet file names.
 ---

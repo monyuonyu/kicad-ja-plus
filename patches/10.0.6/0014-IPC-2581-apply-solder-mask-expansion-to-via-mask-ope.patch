@@ -1,7 +1,7 @@
 From 1b9e43d0d7774c4044d1fcdf5a6c68799ff4b0b0 Mon Sep 17 00:00:00 2001
 From: Akhil Velagapudi <akhilvelagapudi@gmail.com>
 Date: Wed, 1 Jul 2026 16:57:23 -0400
-Subject: [PATCH 14/29] IPC-2581: apply solder mask expansion to via mask
+Subject: [PATCH 14/30] IPC-2581: apply solder mask expansion to via mask
  openings
 
 Mask openings of untented vias were exported at the bare copper

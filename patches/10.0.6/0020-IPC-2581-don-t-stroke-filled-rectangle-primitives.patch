@@ -1,7 +1,7 @@
 From 32f11ebed9e4e613505650bfee274decf6506c6a Mon Sep 17 00:00:00 2001
 From: Akhil Velagapudi <akhilvelagapudi@gmail.com>
 Date: Tue, 29 Sep 2026 08:37:37 +0900
-Subject: [PATCH 20/29] IPC-2581: don't stroke filled rectangle primitives
+Subject: [PATCH 20/30] IPC-2581: don't stroke filled rectangle primitives
 
 From KiCad MR !2667 (https://gitlab.com/kicad/code/kicad/-/merge_requests/2667), applied with fuzz to 10.0.6.
 ---

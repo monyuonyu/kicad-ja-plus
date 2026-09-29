@@ -1,7 +1,7 @@
 From 25f032966f318104006251f28e07bfc33f084229 Mon Sep 17 00:00:00 2001
 From: Akhil Velagapudi <akhilvelagapudi@gmail.com>
 Date: Tue, 29 Sep 2026 08:37:37 +0900
-Subject: [PATCH 19/29] IPC-2581: export real pad shapes in padstack
+Subject: [PATCH 19/30] IPC-2581: export real pad shapes in padstack
  definitions
 
 From KiCad MR !2668 (https://gitlab.com/kicad/code/kicad/-/merge_requests/2668), applied with fuzz to 10.0.6.

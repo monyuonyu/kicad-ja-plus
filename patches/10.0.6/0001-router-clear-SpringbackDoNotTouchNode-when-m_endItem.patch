@@ -1,7 +1,7 @@
 From 730a76d88c0f6100017cf93b23e5b9d88ad7cae0 Mon Sep 17 00:00:00 2001
 From: shota <monyuonyu@gmail.com>
 Date: Tue, 29 Sep 2026 07:36:07 +0900
-Subject: [PATCH 01/29] router: clear SpringbackDoNotTouchNode when m_endItem
+Subject: [PATCH 01/30] router: clear SpringbackDoNotTouchNode when m_endItem
  is null (from master 3b1c8e7ba)
 
 ---

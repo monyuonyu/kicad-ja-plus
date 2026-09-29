@@ -1,7 +1,7 @@
 From a4ad35da8804cd6afb1f9c1c820eba2ddeb16ab2 Mon Sep 17 00:00:00 2001
 From: shota <monyuonyu@gmail.com>
 Date: Tue, 29 Sep 2026 09:06:06 +0900
-Subject: [PATCH 25/29] MR !2770: use GetCanonicalFieldName() (10.0 has no
+Subject: [PATCH 25/30] MR !2770: use GetCanonicalFieldName() (10.0 has no
  TRANSLATION enum)
 
 ---

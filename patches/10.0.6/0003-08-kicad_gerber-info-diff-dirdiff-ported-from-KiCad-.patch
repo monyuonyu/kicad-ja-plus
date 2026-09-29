@@ -1,7 +1,7 @@
 From 2b2a629606ecac71ff13598d8443a424e5d552b7 Mon Sep 17 00:00:00 2001
 From: shota <monyuonyu@gmail.com>
 Date: Tue, 29 Sep 2026 07:36:07 +0900
-Subject: [PATCH 03/29] 08: kicad_gerber info/diff/dirdiff (ported from KiCad
+Subject: [PATCH 03/30] 08: kicad_gerber info/diff/dirdiff (ported from KiCad
  11)
 
 ---

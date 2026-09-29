@@ -1,7 +1,7 @@
 From 925d315bbf2f010641650457d6d9457fc5ce6e23 Mon Sep 17 00:00:00 2001
 From: Danny Andreev <dannyandreev>
 Date: Sun, 5 Jul 2026 17:25:45 -0700
-Subject: [PATCH 15/29] Altium: preserve all footprint filters from
+Subject: [PATCH 15/30] Altium: preserve all footprint filters from
  implementations
 
 ---

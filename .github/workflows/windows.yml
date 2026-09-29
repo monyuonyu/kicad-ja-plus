@@ -86,7 +86,8 @@ jobs:
       - name: Build
         run: |
           ccache -z
-          cmake --build build -j 4
+          # エラーが出ても最後まで続けて、Windows だけで起きるエラーを 1 回で洗い出す
+          cmake --build build -j 4 -- -k 0
           ccache -s
 
       - name: Install and collect the DLLs

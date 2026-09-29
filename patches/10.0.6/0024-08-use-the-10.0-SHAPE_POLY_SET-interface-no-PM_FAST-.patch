@@ -1,7 +1,7 @@
 From 037a2e1f1dcdbd62431d3323f3a3270785260a38 Mon Sep 17 00:00:00 2001
 From: shota <monyuonyu@gmail.com>
 Date: Tue, 29 Sep 2026 08:39:20 +0900
-Subject: [PATCH 24/29] 08: use the 10.0 SHAPE_POLY_SET interface (no PM_FAST
+Subject: [PATCH 24/30] 08: use the 10.0 SHAPE_POLY_SET interface (no PM_FAST
  argument), as in KiCad 11
 
 ---

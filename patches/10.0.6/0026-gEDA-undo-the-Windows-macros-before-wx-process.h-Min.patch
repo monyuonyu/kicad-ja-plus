@@ -1,7 +1,7 @@
 From 286edd6495aa25d6b1af47272d69a96da8b4e3f2 Mon Sep 17 00:00:00 2001
 From: shota <monyuonyu@gmail.com>
 Date: Tue, 29 Sep 2026 09:18:18 +0900
-Subject: [PATCH 26/29] gEDA: undo the Windows macros before wx/process.h
+Subject: [PATCH 26/30] gEDA: undo the Windows macros before wx/process.h
  (MinGW build of 10.0.6)
 
 ---

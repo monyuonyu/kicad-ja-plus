@@ -1,7 +1,7 @@
 From 71ab7d30eb5bb7482e70ccc341d03d825970deba Mon Sep 17 00:00:00 2001
 From: Bernhard Kirchen <schlimmchen@posteo.net>
 Date: Tue, 29 Sep 2026 08:37:38 +0900
-Subject: [PATCH 21/29] try evaluating theme args as path to color theme file
+Subject: [PATCH 21/30] try evaluating theme args as path to color theme file
 
 From KiCad MR !2555 (https://gitlab.com/kicad/code/kicad/-/merge_requests/2555), applied with fuzz to 10.0.6.
 ---

@@ -1,7 +1,7 @@
 From e0254165d02bd5d212b0f9a40ec664a4a32140de Mon Sep 17 00:00:00 2001
 From: shota <monyuonyu@gmail.com>
 Date: Tue, 29 Sep 2026 07:37:20 +0900
-Subject: [PATCH 04/29] 00: fix SWIG's reference count of the type table when
+Subject: [PATCH 04/30] 00: fix SWIG's reference count of the type table when
  thisown is changed (Remove() in scripts)
 
 ---

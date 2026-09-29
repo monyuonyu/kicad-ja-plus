@@ -1,7 +1,7 @@
 From e253e90651cdbc08db5bf18cbdab3463317e7b59 Mon Sep 17 00:00:00 2001
 From: Nicolas Munnich <nickmunnich@gmail.com>
 Date: Fri, 18 Sep 2026 08:45:04 +0100
-Subject: [PATCH 16/29] PCM: Allow installing design blocks
+Subject: [PATCH 16/30] PCM: Allow installing design blocks
 
 ADDED: Enables the PCM to install design
 block libraries by using the name 'design_blocks'

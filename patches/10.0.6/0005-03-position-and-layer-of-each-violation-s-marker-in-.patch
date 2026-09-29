@@ -1,7 +1,7 @@
 From f3ff058a50924b0985d469eba75fb1a01d829116 Mon Sep 17 00:00:00 2001
 From: shota <monyuonyu@gmail.com>
 Date: Tue, 29 Sep 2026 07:38:21 +0900
-Subject: [PATCH 05/29] 03: position and layer of each violation's marker in
+Subject: [PATCH 05/30] 03: position and layer of each violation's marker in
  the DRC JSON report (MR !2780)
 
 Also fixes the trailing comma that made resources/schemas/drc.v1.json invalid JSON.
