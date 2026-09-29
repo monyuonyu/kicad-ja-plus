@@ -1,7 +1,7 @@
 # KiCad に改良を当ててビルドし、回帰試験を流す（Linux、版ごと）
 name: Build and test
 on:
-  push:
+  # 非公開の間は自動ビルドの時間に上限があるので、手で走らせる（gh workflow run build.yml）
   workflow_dispatch:
 
 jobs:

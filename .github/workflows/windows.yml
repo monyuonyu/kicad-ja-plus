@@ -47,7 +47,13 @@ jobs:
         run: |
           git clone -q --depth 1 --branch "$KV" https://github.com/KiCad/kicad-source-mirror kicad
           cd kicad
-          # MSYS2 の Windows 向けの手直し（MINGW-packages の mingw-w64-kicad より）
+          # このリポジトリの改良を先に（git apply はずれを許さないので、手を入れていない版に当てる）
+          if [ "${{ inputs.apply_local }}" = "true" ]; then
+            for p in ../patches/$KV/[0-9]*.patch; do
+              git apply --whitespace=nowarn "$p" || { echo "当たらない: $p"; exit 1; }
+            done
+          fi
+          # MSYS2 の Windows 向けの手直し（MINGW-packages の mingw-w64-kicad より。patch はずれを許して当てる）
           base="https://raw.githubusercontent.com/msys2/MINGW-packages/$MSYS2_PKGS_REF/mingw-w64-kicad"
           for p in 002-ki-6.0-cmake-fixes-for-MINGW-CLANG.patch 003-ki-6.0-code-fixes-for-GNUC-CLANG.patch \
                    004-fix-loading-ngspice-dll.patch 006-ki-6.0-rewrite-kiwin32_rc_for_clang.patch \
@@ -55,11 +61,6 @@ jobs:
             curl -fsSL "$base/$p" -o "../$p"
             patch -Np1 -i "../$p" || { echo "当たらない: $p"; exit 1; }
           done
-          if [ "${{ inputs.apply_local }}" = "true" ]; then
-            for p in ../patches/$KV/*.patch; do
-              git apply --whitespace=nowarn "$p" || { echo "当たらない: $p"; exit 1; }
-            done
-          fi
 
       - uses: actions/cache@v4
         with:
