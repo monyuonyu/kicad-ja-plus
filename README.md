@@ -1,11 +1,18 @@
-# kicad-local — 画面なしでも基板を扱える KiCad 8.0.9 の改良版
+# kicad-ja-local — 画面なしでも基板を扱える KiCad の改良版
 
-KiCad 8.0.9 に、次の 2 つを足したものです。
+KiCad に、次のものを足したものです。版は 2 つあります。
+
+| 版 | 向いている使い方 |
+|---|---|
+| **10.0.6**（おすすめ） | 最新の安定版に合わせたもの。本家の MR から、製造データや DRC の不具合の修正も取り込んでいる。**画面が無いサーバーや CI、AI からもそのまま動く** |
+| 8.0.9 | 直したファイルを KiCad 8 のまま使い続けたいとき |
+
+足したもの:
 
 - 画面を開かずに基板と回路図を扱う道具（配線・部品の移動・DRC/ERC・3D 画像・製造データの比較・回路の計算）
 - KiCad 9〜11 や本家の MR からの機能と修正
 
-**保存形式は KiCad 8 のまま**なので、直したファイルはふつうの KiCad 8 でそのまま開けます。
+**保存形式は、それぞれの版の本家の KiCad と同じ**なので、直したファイルはふつうの KiCad（10 または 8）でそのまま開けます。
 
 ## できること
 
@@ -38,41 +45,33 @@ kicad-local review 新しい版 前の版 --out 確認/        # ERC・DRC・3D�
 
 ## 取り込んだ変更
 
-| # | 内容 | 出どころ |
-|---|---|---|
-| 00 | kicad_route（画面なしの配線コマンド）＋ SWIG の参照数の不具合の修正 | 独自 |
-| 01 | 押しのけ配線ルーターの不具合修正 19 件（8.0.9 向けに 3 件を調整） | KiCad 9〜11（master） |
-| 02 | `kicad-cli pcb drc --refill-zones --save-board` | KiCad 10 |
-| 03 | DRC の JSON に、違反の位置と層 | MR !2780 |
-| 04 | 部品を動かすとき、つながった線を迂回させて引き直す | MR !2188 |
-| 05 | `kicad-cli pcb export stats`（基板の統計） | KiCad 10 |
-| 06 | `kicad-cli pcb render`（画面なしの 3D レイトレース画像） | KiCad 9 ＋ master |
-| 07 | kicad-route の使い勝手（help・info・check・シルクの自動退避・手順書） | 独自 |
-| 08 | `kicad-gerber`（ガーバーの情報と差分）、fabdiff、renderdiff | KiCad 11 から移植 |
+版ごとに、出どころ（本家のコミットや MR）・その版に合わせた調整・確かめたことを書いています。
 
-それぞれの出どころ（コミット）・8.0.9 向けの調整・確かめたことは [patches/README.md](patches/README.md) にあります。
-ファイル形式を変える機能（KiCad 9 以降の保存形式）は入れていません。
+- [10.0.6](patches/10.0.6/README.md): このリポジトリの改良（画面なしの配線コマンド、DRC の JSON に位置と層、部品を動かすときの迂回、ガーバーの比較ほか）と、**本家の MR 11 件**（ODB++・IPC-2581 の製造データの誤り、回路図との整合チェックのバリアント対応、`--theme` にファイルほか）
+- [8.0.9](patches/8.0.9/README.md): 00〜08（ルーターの修正 19 件、KiCad 9〜11 の機能の取り込みほか）
+
+ファイルの形式を変える機能は入れていません。
 
 ## 作り方（Linux）
 
 1. ビルドに要るパッケージを入れる（Ubuntu/Debian。一覧は [patches/notes/builddeps.txt](patches/notes/builddeps.txt)）
 
    ```
-   sudo apt install $(cat patches/notes/builddeps.txt)
+   sudo apt install $(cat patches/10.0.6/builddeps.txt)     # 8.0.9 なら patches/8.0.9/notes/builddeps.txt
    ```
 
-2. KiCad 8.0.9 のソースを取ってきて改良を当てる（既定の場所は `~/src/kicad-8.0.9`）
+2. KiCad のソースを取ってきて改良を当てる（既定の場所は `~/src/kicad-<版>`）
 
    ```
-   ./apply.sh
+   ./apply.sh 10.0.6        # または ./apply.sh 8.0.9
    ```
 
-3. ビルドする（既定の場所は `~/src/build-8.0.9`。Ubuntu 24.04 で確かめた設定）
+3. ビルドする（Ubuntu 24.04 で確かめた設定。8.0.9 なら 10.0.6 を 8.0.9 に読み替える）
 
    ```
-   cmake -S ~/src/kicad-8.0.9 -B ~/src/build-8.0.9 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+   cmake -S ~/src/kicad-10.0.6 -B ~/src/build-10.0.6 -G Ninja -DCMAKE_BUILD_TYPE=Release \
          -DKICAD_BUILD_PNS_DEBUG_TOOL=ON -DKICAD_SCRIPTING_WXPYTHON=OFF -DKICAD_BUILD_I18N=OFF
-   ninja -C ~/src/build-8.0.9 -j4 kicad-cli pcbnew_kiface eeschema_kiface cvpcb_kiface kicad_route kicad_gerber \
+   ninja -C ~/src/build-10.0.6 -j4 kicad-cli pcbnew_kiface eeschema_kiface cvpcb_kiface kicad_route kicad_gerber \
          pcbnew/_pcbnew.so s3d_plugin_vrml s3d_plugin_oce s3d_plugin_idf
    ```
 
@@ -87,7 +86,8 @@ kicad-local review 新しい版 前の版 --out 確認/        # ERC・DRC・3D�
    kicad-local help
    ```
 
-   ビルドした場所を変えたときは `KICAD_LOCAL_BUILD` を、ソースの場所を変えたときは `KICAD_LOCAL_SRC` を設定します。
+   ビルドした場所は `KICAD_LOCAL_BUILD` で指定します（既定は `~/src/build-10.0.6`。8.0.9 なら `export KICAD_LOCAL_BUILD=~/src/build-8.0.9`）。
+   ソースの場所を変えたときは `KICAD_LOCAL_SRC` を設定します。
    部品ライブラリ（フットプリント・シンボル・3D モデル）は、システムに入れた KiCad 8 のもの（`/usr/share/kicad`）を使います。
 
 ## 試験
@@ -103,7 +103,8 @@ KiCad 8.0.9 に付いてくるデモの基板（pic_programmer）と回路図（
 
 | 場所 | 中身 |
 |---|---|
-| `patches/` | KiCad 8.0.9 への改良。`ALL-combined.patch` が全部をまとめたもの（`apply.sh` が当てる）。番号付きのパッチは来歴の記録 |
+| `patches/10.0.6/` | KiCad 10.0.6 への改良（番号順のパッチ。本家の MR は作者の名前つき） |
+| `patches/8.0.9/` | KiCad 8.0.9 への改良。`ALL-combined.patch` が全部をまとめたもの。番号付きのパッチは来歴の記録 |
 | `bin/` | 入口（`kicad-local`、`kicad-route`、`kicad-gerber`、`kicad-cli-local`、`kicad-python`） |
 | `tools/` | Python の道具（review・lint・sch・sim・pcbsync・silkfix ほか） |
 | `test/` | 回帰試験 |

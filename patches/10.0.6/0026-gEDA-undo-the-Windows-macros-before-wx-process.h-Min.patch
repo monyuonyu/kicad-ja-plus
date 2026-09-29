@@ -1,0 +1,29 @@
+From 286edd6495aa25d6b1af47272d69a96da8b4e3f2 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Tue, 29 Sep 2026 09:18:18 +0900
+Subject: [PATCH 26/29] gEDA: undo the Windows macros before wx/process.h
+ (MinGW build of 10.0.6)
+
+---
+ pcbnew/pcb_io/geda/pcb_io_geda.cpp | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/pcbnew/pcb_io/geda/pcb_io_geda.cpp b/pcbnew/pcb_io/geda/pcb_io_geda.cpp
+index 4461d0e6..138c68a9 100644
+--- a/pcbnew/pcb_io/geda/pcb_io_geda.cpp
++++ b/pcbnew/pcb_io/geda/pcb_io_geda.cpp
+@@ -48,6 +48,11 @@
+ #include <board_design_settings.h>
+ #include <font/fontconfig.h>
+ #include <footprint.h>
++#ifdef __WXMSW__
++// An earlier header brings in <windows.h>, whose GetClassInfo macro breaks wx/process.h
++// (pulled in by gestfich.h) with MinGW: undo the Windows macros first
++#include <wx/msw/winundef.h>
++#endif
+ #include <gestfich.h>
+ #include <netinfo.h>
+ #include <pad.h>
+-- 
+2.43.0
+

@@ -1,0 +1,49 @@
+From 57c70aa40bf5c7cddbbc1a328b9f7771b5fb293e Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Tue, 29 Sep 2026 08:25:25 +0900
+Subject: [PATCH 06/29] 04: use the 10.0 walkaround interface (as
+ DRAGGER::tryWalkaround)
+
+---
+ pcbnew/router/pns_component_dragger.cpp | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/pcbnew/router/pns_component_dragger.cpp b/pcbnew/router/pns_component_dragger.cpp
+index 43d4bdda..53d4e07c 100644
+--- a/pcbnew/router/pns_component_dragger.cpp
++++ b/pcbnew/router/pns_component_dragger.cpp
+@@ -352,7 +352,7 @@ bool COMPONENT_DRAGGER::Drag( const VECTOR2I& aP )
+ }
+ 
+ 
+-// KiCad MR !2188 から移植(8.0.9 の WALKAROUND::Route に合わせて調整)
++// Ported from KiCad MR !2188 (same walkaround as DRAGGER::tryWalkaround in 10.0)
+ bool COMPONENT_DRAGGER::tryWalkaround( NODE* aNode, LINE& aOrig, LINE& aWalk )
+ {
+     WALKAROUND walkaround( aNode, Router() );
+@@ -360,10 +360,20 @@ bool COMPONENT_DRAGGER::tryWalkaround( NODE* aNode, LINE& aOrig, LINE& aWalk )
+     walkaround.SetDebugDecorator( Dbg() );
+     walkaround.SetLogger( Logger() );
+     walkaround.SetIterationLimit( Settings().WalkaroundIterationLimit() );
+-    walkaround.SetLengthLimit( true );
++    walkaround.SetLengthLimit( true, 30.0 );
++    walkaround.SetAllowedPolicies( { WALKAROUND::WP_SHORTEST } );
+ 
+     aWalk = aOrig;
+-    return walkaround.Route( aOrig, aWalk, false ) == WALKAROUND::DONE;
++
++    WALKAROUND::RESULT wr = walkaround.Route( aWalk );
++
++    if( wr.status[ WALKAROUND::WP_SHORTEST ] == WALKAROUND::ST_DONE )
++    {
++        aWalk = wr.lines[ WALKAROUND::WP_SHORTEST ];
++        return true;
++    }
++
++    return false;
+ }
+ 
+ 
+-- 
+2.43.0
+

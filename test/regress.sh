@@ -4,7 +4,7 @@
 # 回路図の試験は同じく demos/interf_u（sch/）。
 # このリポジトリの場所(道具と試験を探す)と、修正版 KiCad をビルドした場所
 KICAD_LOCAL_HOME=${KICAD_LOCAL_HOME:-$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)}
-KICAD_LOCAL_BUILD=${KICAD_LOCAL_BUILD:-$HOME/src/build-8.0.9}
+KICAD_LOCAL_BUILD=${KICAD_LOCAL_BUILD:-$HOME/src/build-10.0.6}
 export KICAD_LOCAL_HOME KICAD_LOCAL_BUILD
 export PATH="$KICAD_LOCAL_HOME/bin:$PATH"   # ほかの入口(kicad-python など)を名前で呼ぶ
 cd "$(dirname "$0")"

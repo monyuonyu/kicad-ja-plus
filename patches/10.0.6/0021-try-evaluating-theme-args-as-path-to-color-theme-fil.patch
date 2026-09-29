@@ -1,0 +1,330 @@
+From 71ab7d30eb5bb7482e70ccc341d03d825970deba Mon Sep 17 00:00:00 2001
+From: Bernhard Kirchen <schlimmchen@posteo.net>
+Date: Tue, 29 Sep 2026 08:37:38 +0900
+Subject: [PATCH 21/29] try evaluating theme args as path to color theme file
+
+From KiCad MR !2555 (https://gitlab.com/kicad/code/kicad/-/merge_requests/2555), applied with fuzz to 10.0.6.
+---
+ common/settings/settings_manager.cpp    |  29 ++++--
+ include/settings/settings_manager.h     |   9 +-
+ kicad/cli/command_fp_export_svg.cpp     |   4 +-
+ kicad/cli/command_pcb_export_pdf.cpp    |   3 +-
+ kicad/cli/command_pcb_export_ps.cpp     |   3 +-
+ kicad/cli/command_pcb_export_svg.cpp    |   3 +-
+ kicad/cli/command_sch_export_plot.cpp   |   3 +-
+ kicad/cli/command_sym_export_svg.cpp    |   2 +-
+ qa/tests/common/CMakeLists.txt          |   3 +
+ qa/tests/common/test_color_settings.cpp | 124 ++++++++++++++++++++++++
+ 10 files changed, 167 insertions(+), 16 deletions(-)
+ create mode 100644 qa/tests/common/test_color_settings.cpp
+
+diff --git a/common/settings/settings_manager.cpp b/common/settings/settings_manager.cpp
+index 9fa4a4ef..8d470ff0 100644
+--- a/common/settings/settings_manager.cpp
++++ b/common/settings/settings_manager.cpp
+@@ -271,7 +271,7 @@ COLOR_SETTINGS* SETTINGS_MANAGER::GetColorSettings( const wxString& aName )
+     // No match? See if we can load it
+     if( !aName.empty() )
+     {
+-        COLOR_SETTINGS* ret = loadColorSettingsByName( aName );
++        COLOR_SETTINGS* ret = loadColorSettingsByPath( aName );
+ 
+         if( !ret )
+         {
+@@ -303,20 +303,37 @@ std::vector<COLOR_SETTINGS*> SETTINGS_MANAGER::GetColorSettingsList()
+ }
+ 
+ 
+-COLOR_SETTINGS* SETTINGS_MANAGER::loadColorSettingsByName( const wxString& aName )
++COLOR_SETTINGS* SETTINGS_MANAGER::loadColorSettingsByPath( const wxString& aName )
+ {
+     wxLogTrace( traceSettings, wxT( "Attempting to load color theme %s" ), aName );
+ 
+     wxFileName fn( GetColorSettingsPath(), aName, wxS( "json" ) );
++    bool       useAbsolutePath = false;
+ 
+     if( !fn.IsOk() || !fn.Exists() )
+     {
+-        wxLogTrace( traceSettings, wxT( "Theme file %s.json not found, falling back to user" ),
+-                    aName );
+-        return nullptr;
++        wxLogTrace( traceSettings, wxT( "Theme file '%s' does not exist" ), fn.GetFullPath() );
++
++        fn = wxFileName( aName );
++
++        if( fn.GetExt().IsEmpty() )
++            fn.SetExt( wxS( "json" ) );
++
++        useAbsolutePath = true;
++
++        if( !fn.IsOk() || !fn.Exists() )
++        {
++            wxLogTrace( traceSettings, wxT( "Theme file '%s' does not exist, falling back to user" ),
++                        fn.GetFullPath() );
++            return nullptr;
++        }
+     }
+ 
+-    COLOR_SETTINGS* settings = RegisterSettings( new COLOR_SETTINGS( aName ) );
++    COLOR_SETTINGS* settings = RegisterSettings( new COLOR_SETTINGS( aName, useAbsolutePath ) );
++
++    // do not modify user-provided theme file, as KiCad does not own it
++    if( useAbsolutePath )
++        settings->SetReadOnly( true );
+ 
+     if( settings->GetFilename() != aName.ToStdString() )
+     {
+diff --git a/include/settings/settings_manager.h b/include/settings/settings_manager.h
+index 1b96897f..15ab5617 100644
+--- a/include/settings/settings_manager.h
++++ b/include/settings/settings_manager.h
+@@ -497,12 +497,15 @@ private:
+                                 int* aMinor = nullptr );
+ 
+     /**
+-     * Attempt to load a color theme by name (the color theme directory and .json ext are assumed).
++     * Attempt to load a color theme by its file name (the color theme
++     * directory and .json ext are assumed) or from the given argument
++     * interpreted as a path.
+      *
+-     * @param aName is the filename of the color theme (without the extension or path).
++     * @param aName is the filename of the color theme (without the extension
++     * or path) or an existing path to a color theme file.
+      * @return the loaded settings, or nullptr if load failed.
+      */
+-    COLOR_SETTINGS* loadColorSettingsByName( const wxString& aName );
++    COLOR_SETTINGS* loadColorSettingsByPath( const wxString& aName );
+ 
+     COLOR_SETTINGS* registerColorSettings( const wxString& aFilename, bool aAbsolutePath = false );
+ 
+diff --git a/kicad/cli/command_fp_export_svg.cpp b/kicad/cli/command_fp_export_svg.cpp
+index 49ae793c..54c5a705 100644
+--- a/kicad/cli/command_fp_export_svg.cpp
++++ b/kicad/cli/command_fp_export_svg.cpp
+@@ -41,8 +41,8 @@ CLI::FP_EXPORT_SVG_COMMAND::FP_EXPORT_SVG_COMMAND() :
+ 
+     m_argParser.add_argument( "-t", ARG_THEME )
+             .default_value( std::string() )
+-            .help( UTF8STDSTR( _( "Color theme to use (will default to footprint editor "
+-                                  "settings)" ) ) );
++            .help( UTF8STDSTR( _( "Color theme to use (theme name or path to theme file; will default to footprint "
++                                  "editor settings)" ) ) );
+ 
+     m_argParser.add_argument( "--fp", ARG_FOOTPRINT )
+             .default_value( std::string() )
+diff --git a/kicad/cli/command_pcb_export_pdf.cpp b/kicad/cli/command_pcb_export_pdf.cpp
+index e3492010..0a4dff24 100644
+--- a/kicad/cli/command_pcb_export_pdf.cpp
++++ b/kicad/cli/command_pcb_export_pdf.cpp
+@@ -86,7 +86,8 @@ CLI::PCB_EXPORT_PDF_COMMAND::PCB_EXPORT_PDF_COMMAND() :
+ 
+     m_argParser.add_argument( "-t", ARG_THEME )
+             .default_value( std::string() )
+-            .help( UTF8STDSTR( _( "Color theme to use (will default to PCB Editor settings)" ) ) )
++            .help( UTF8STDSTR( _(
++                    "Color theme to use (theme name or path to theme file; will default to PCB editor settings)" ) ) )
+             .metavar( "THEME_NAME" );
+ 
+     m_argParser.add_argument( ARG_DRILL_SHAPE_OPTION )
+diff --git a/kicad/cli/command_pcb_export_ps.cpp b/kicad/cli/command_pcb_export_ps.cpp
+index 7b7815ee..2274211f 100644
+--- a/kicad/cli/command_pcb_export_ps.cpp
++++ b/kicad/cli/command_pcb_export_ps.cpp
+@@ -89,7 +89,8 @@ CLI::PCB_EXPORT_PS_COMMAND::PCB_EXPORT_PS_COMMAND() :
+ 
+     m_argParser.add_argument( "-t", ARG_THEME )
+             .default_value( std::string() )
+-            .help( UTF8STDSTR( _( "Color theme to use (will default to PCB Editor settings)" ) ) )
++            .help( UTF8STDSTR( _(
++                    "Color theme to use (theme name or path to theme file; will default to PCB editor settings)" ) ) )
+             .metavar( "THEME_NAME" );
+ 
+     m_argParser.add_argument( ARG_DRILL_SHAPE_OPTION )
+diff --git a/kicad/cli/command_pcb_export_svg.cpp b/kicad/cli/command_pcb_export_svg.cpp
+index 5af8cd0f..0f5b35fb 100644
+--- a/kicad/cli/command_pcb_export_svg.cpp
++++ b/kicad/cli/command_pcb_export_svg.cpp
+@@ -55,7 +55,8 @@ CLI::PCB_EXPORT_SVG_COMMAND::PCB_EXPORT_SVG_COMMAND() :
+ 
+     m_argParser.add_argument( "-t", ARG_THEME )
+             .default_value( std::string() )
+-            .help( UTF8STDSTR( _( "Color theme to use (will default to PCB editor settings)" ) ) )
++            .help( UTF8STDSTR( _(
++                    "Color theme to use (theme name or path to theme file; will default to PCB editor settings)" ) ) )
+             .metavar( "THEME_NAME" );
+ 
+     m_argParser.add_argument( ARG_NEGATIVE_SHORT, ARG_NEGATIVE )
+diff --git a/kicad/cli/command_sch_export_plot.cpp b/kicad/cli/command_sch_export_plot.cpp
+index 52274f1c..9f660e58 100644
+--- a/kicad/cli/command_sch_export_plot.cpp
++++ b/kicad/cli/command_sch_export_plot.cpp
+@@ -59,7 +59,8 @@ CLI::SCH_EXPORT_PLOT_COMMAND::SCH_EXPORT_PLOT_COMMAND( const std::string& aName,
+ 
+     m_argParser.add_argument( "-t", ARG_THEME )
+             .default_value( std::string() )
+-            .help( UTF8STDSTR( _( "Color theme to use (will default to schematic settings)" ) ) )
++            .help( UTF8STDSTR(
++                    _( "Color theme to use (theme name or path to theme file; will default to schematic settings)" ) ) )
+             .metavar( "THEME_NAME" );
+     m_argParser.add_argument( "-b", ARG_BLACKANDWHITE )
+             .help( UTF8STDSTR( _( ARG_BLACKANDWHITE_DESC ) ) )
+diff --git a/kicad/cli/command_sym_export_svg.cpp b/kicad/cli/command_sym_export_svg.cpp
+index 8527253b..c9d24f30 100644
+--- a/kicad/cli/command_sym_export_svg.cpp
++++ b/kicad/cli/command_sym_export_svg.cpp
+@@ -46,7 +46,7 @@ CLI::SYM_EXPORT_SVG_COMMAND::SYM_EXPORT_SVG_COMMAND() : COMMAND( "svg" )
+ 
+     m_argParser.add_argument( "-t", ARG_THEME )
+             .default_value( std::string() )
+-            .help( UTF8STDSTR( _( "Color theme to use (will default to symbol editor "
++            .help( UTF8STDSTR( _( "Color theme to use (theme name or path to theme file; will default to symbol editor "
+                                   "settings)" ) ) )
+             .metavar( "THEME_NAME" );
+ 
+diff --git a/qa/tests/common/CMakeLists.txt b/qa/tests/common/CMakeLists.txt
+index 84e9ebe0..c9e5975a 100644
+--- a/qa/tests/common/CMakeLists.txt
++++ b/qa/tests/common/CMakeLists.txt
+@@ -138,6 +138,9 @@ set( QA_COMMON_SRCS
+     test_project_template.cpp
+     ${CMAKE_SOURCE_DIR}/kicad/project_template.cpp
+ 
++    # Color settings tests
++    test_color_settings.cpp
++
+     # Project file tests
+     test_project_file.cpp
+     test_settings_manager.cpp
+diff --git a/qa/tests/common/test_color_settings.cpp b/qa/tests/common/test_color_settings.cpp
+new file mode 100644
+index 00000000..a8e9b775
+--- /dev/null
++++ b/qa/tests/common/test_color_settings.cpp
+@@ -0,0 +1,124 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright The KiCad Developers, see AUTHORS.TXT for contributors.
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * as published by the Free Software Foundation; either version 2
++ * of the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, you may find one here:
++ * http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
++ * or you may search the http://www.gnu.org website for the version 2 license,
++ * or you may write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
++ */
++
++/**
++ * @file test_color_settings.cpp
++ * Tests for loading color themes via SETTINGS_MANAGER::GetColorSettings().
++ */
++
++#include <qa_utils/wx_utils/unit_test_utils.h>
++#include <settings/color_settings.h>
++#include <settings/settings_manager.h>
++
++#include <filesystem>
++#include <fstream>
++
++namespace fs = std::filesystem;
++
++class COLOR_SETTINGS_TEST_FIXTURE
++{
++public:
++    COLOR_SETTINGS_TEST_FIXTURE()
++    {
++        m_tempDir = fs::temp_directory_path() / "kicad_color_settings_test";
++        fs::remove_all( m_tempDir );
++        fs::create_directories( m_tempDir );
++
++        fs::path      themePath = m_tempDir / "mytheme.json";
++        std::ofstream themeFile( themePath );
++        themeFile << R"({ "meta": { "name": "My Test Theme" } })";
++        themeFile.close();
++
++        m_themePathWithExt = wxString( themePath.string() );
++        m_themePathWithoutExt = wxString( ( m_tempDir / "mytheme" ).string() );
++        m_nonExistentPath = wxString( ( m_tempDir / "nosuchtheme" ).string() );
++        m_nonExistentName = wxString( "nosuchthemename" );
++    }
++
++    ~COLOR_SETTINGS_TEST_FIXTURE() { fs::remove_all( m_tempDir ); }
++
++    fs::path m_tempDir;
++    wxString m_themePathWithExt;
++    wxString m_themePathWithoutExt;
++    wxString m_nonExistentPath;
++    wxString m_nonExistentName;
++};
++
++
++BOOST_FIXTURE_TEST_SUITE( ColorSettings, COLOR_SETTINGS_TEST_FIXTURE )
++
++
++/**
++ * A theme file can be loaded by passing the full path including the .json extension.
++ */
++BOOST_AUTO_TEST_CASE( LoadByAbsolutePathWithExtension )
++{
++    SETTINGS_MANAGER manager;
++
++    COLOR_SETTINGS* settings = manager.GetColorSettings( m_themePathWithExt );
++
++    BOOST_REQUIRE( settings != nullptr );
++    BOOST_CHECK_EQUAL( settings->GetName(), wxS( "My Test Theme" ) );
++    BOOST_CHECK( settings->IsReadOnly() );
++}
++
++
++/**
++ * A theme file can be loaded by passing the full path without the .json extension.
++ */
++BOOST_AUTO_TEST_CASE( LoadByAbsolutePathWithoutExtension )
++{
++    SETTINGS_MANAGER manager;
++
++    COLOR_SETTINGS* settings = manager.GetColorSettings( m_themePathWithoutExt );
++
++    BOOST_REQUIRE( settings != nullptr );
++    BOOST_CHECK_EQUAL( settings->GetName(), wxS( "My Test Theme" ) );
++    BOOST_CHECK( settings->IsReadOnly() );
++}
++
++
++/**
++ * Given a non-existent path or non-existent theme name, we fall back to an
++ * in-memory copy of the built-in default theme, i.e., GetColorSettings()
++ * guarantees to return a valid pointer.
++ */
++BOOST_AUTO_TEST_CASE( NonExistentPathFallsBackToDefault )
++{
++    SETTINGS_MANAGER manager;
++
++    COLOR_SETTINGS* settings = manager.GetColorSettings( m_nonExistentPath );
++
++    BOOST_REQUIRE( settings != nullptr );
++    // fallback copies built-in default in memory, which is safe to modify
++    BOOST_CHECK( !settings->IsReadOnly() );
++    BOOST_CHECK_EQUAL( settings->GetFilename(), DEFAULT_THEME );
++
++    settings = manager.GetColorSettings( m_nonExistentName );
++    BOOST_REQUIRE( settings != nullptr );
++    BOOST_CHECK( !settings->IsReadOnly() );
++    BOOST_CHECK_EQUAL( settings->GetFilename(), DEFAULT_THEME );
++}
++
++
++BOOST_AUTO_TEST_SUITE_END()
+-- 
+2.43.0
+

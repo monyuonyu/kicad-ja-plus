@@ -1,0 +1,54 @@
+From a4ad35da8804cd6afb1f9c1c820eba2ddeb16ab2 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Tue, 29 Sep 2026 09:06:06 +0900
+Subject: [PATCH 25/29] MR !2770: use GetCanonicalFieldName() (10.0 has no
+ TRANSLATION enum)
+
+---
+ pcbnew/drc/drc_test_provider_schematic_parity.cpp | 2 +-
+ pcbnew/netlist_reader/pcb_netlist.cpp             | 2 +-
+ qa/tests/pcbnew/test_variant.cpp                  | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/pcbnew/drc/drc_test_provider_schematic_parity.cpp b/pcbnew/drc/drc_test_provider_schematic_parity.cpp
+index 92ed6b07..72590ec1 100644
+--- a/pcbnew/drc/drc_test_provider_schematic_parity.cpp
++++ b/pcbnew/drc/drc_test_provider_schematic_parity.cpp
+@@ -103,7 +103,7 @@ void DRC_TEST_PROVIDER_SCHEMATIC_PARITY::testNetlist( NETLIST& aNetlist )
+         nlohmann::ordered_map<wxString, wxString> componentFields = component->GetFields( variant );
+         std::map<wxString, wxString>              componentProperties = component->GetProperties( variant );
+ 
+-        const wxString valueField = GetDefaultFieldName( FIELD_T::VALUE, UNTRANSLATED );
++        const wxString valueField = GetCanonicalFieldName( FIELD_T::VALUE );
+         const wxString componentValue = component->GetValue( variant );
+ 
+         if( footprint == nullptr )
+diff --git a/pcbnew/netlist_reader/pcb_netlist.cpp b/pcbnew/netlist_reader/pcb_netlist.cpp
+index c126c3ef..c514e06b 100644
+--- a/pcbnew/netlist_reader/pcb_netlist.cpp
++++ b/pcbnew/netlist_reader/pcb_netlist.cpp
+@@ -191,7 +191,7 @@ wxString COMPONENT::GetValue( const wxString& aVariantName ) const
+ {
+     if( const COMPONENT_VARIANT* variant = GetVariant( aVariantName ) )
+     {
+-        auto it = variant->m_fields.find( GetDefaultFieldName( FIELD_T::VALUE, UNTRANSLATED ) );
++        auto it = variant->m_fields.find( GetCanonicalFieldName( FIELD_T::VALUE ) );
+ 
+         if( it != variant->m_fields.end() )
+             return it->second;
+diff --git a/qa/tests/pcbnew/test_variant.cpp b/qa/tests/pcbnew/test_variant.cpp
+index 91c2dfac..454b6a99 100644
+--- a/qa/tests/pcbnew/test_variant.cpp
++++ b/qa/tests/pcbnew/test_variant.cpp
+@@ -1399,7 +1399,7 @@ BOOST_AUTO_TEST_CASE( VariantUpdateLeavesSchematicParityClean )
+     variant.m_hasDnp = true;
+     variant.m_excludedFromBOM = true;
+     variant.m_hasExcludedFromBOM = true;
+-    variant.m_fields[GetDefaultFieldName( FIELD_T::VALUE, UNTRANSLATED )] = "22K";
++    variant.m_fields[GetCanonicalFieldName( FIELD_T::VALUE )] = "22K";
+     variant.m_fields["Variant only"] = "fitted";
+     component->AddVariant( variant );
+     netlist.AddComponent( component );
+-- 
+2.43.0
+

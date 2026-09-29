@@ -1,0 +1,1159 @@
+From 2b2a629606ecac71ff13598d8443a424e5d552b7 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Tue, 29 Sep 2026 07:36:07 +0900
+Subject: [PATCH 03/29] 08: kicad_gerber info/diff/dirdiff (ported from KiCad
+ 11)
+
+---
+ gerbview/CMakeLists.txt        |  19 ++
+ gerbview/gerber_diff.cpp       | 186 +++++++++++
+ gerbview/gerber_diff.h         | 157 +++++++++
+ gerbview/gerber_to_polyset.cpp | 124 +++++++
+ gerbview/gerber_to_polyset.h   |  43 +++
+ gerbview/kicad_gerber_main.cpp | 569 +++++++++++++++++++++++++++++++++
+ 6 files changed, 1098 insertions(+)
+ create mode 100644 gerbview/gerber_diff.cpp
+ create mode 100644 gerbview/gerber_diff.h
+ create mode 100644 gerbview/gerber_to_polyset.cpp
+ create mode 100644 gerbview/gerber_to_polyset.h
+ create mode 100644 gerbview/kicad_gerber_main.cpp
+
+diff --git a/gerbview/CMakeLists.txt b/gerbview/CMakeLists.txt
+index aa7c32eb..12faec2d 100644
+--- a/gerbview/CMakeLists.txt
++++ b/gerbview/CMakeLists.txt
+@@ -242,3 +242,22 @@ if( KICAD_WIN32_INSTALL_PDBS )
+     install(FILES $<TARGET_PDB_FILE:gerbview> DESTINATION ${KICAD_BIN})
+     install(FILES $<TARGET_PDB_FILE:gerbview_kiface> DESTINATION ${KICAD_KIFACE})
+ endif()
++
++# kicad_gerber: ガーバー/ドリルの情報と差分(画面なし)。KiCad 11 の kicad-cli gerber を参考にしたローカル追加
++add_executable( kicad_gerber
++    kicad_gerber_main.cpp
++    gerber_to_polyset.cpp
++    gerber_diff.cpp
++    )
++target_include_directories( kicad_gerber PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} )
++target_link_libraries( kicad_gerber
++    gerbview_kiface_objects
++    common
++    gal
++    core
++    kiplatform
++    ${wxWidgets_LIBRARIES}
++    ${CAIRO_LIBRARIES}
++    gerbview_navlib
++    kiplatform
++    )
+diff --git a/gerbview/gerber_diff.cpp b/gerbview/gerber_diff.cpp
+new file mode 100644
+index 00000000..408bb4f7
+--- /dev/null
++++ b/gerbview/gerber_diff.cpp
+@@ -0,0 +1,186 @@
++// KiCad master gerbview/gerber_diff.cpp を 8.0.9 向けに移植(ローカル修正)。元: 4852b8485 以降
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright (C) 2025 KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#include "gerber_diff.h"
++#include <base_units.h>
++#include <cmath>
++#include <nlohmann/json.hpp>  // 8.0.9: json_common.h は 9 以降
++
++
++VECTOR2I CalculateAlignment( const SHAPE_POLY_SET& aReference, const SHAPE_POLY_SET& aComparison )
++{
++    if( aReference.OutlineCount() == 0 || aComparison.OutlineCount() == 0 )
++        return VECTOR2I( 0, 0 );
++
++    BOX2I refBBox = aReference.BBox();
++    BOX2I cmpBBox = aComparison.BBox();
++
++    // Align by bounding box origins
++    return refBBox.GetOrigin() - cmpBBox.GetOrigin();
++}
++
++
++GERBER_DIFF_RESULT CalculateGerberDiff( const SHAPE_POLY_SET& aReference, const SHAPE_POLY_SET& aComparison )
++{
++    GERBER_DIFF_RESULT result;
++
++    constexpr double IU2_TO_MM2 = 1e-10;
++
++    // overlap = reference ∩ comparison
++    result.overlap = aReference;
++    result.overlap.BooleanIntersection( aComparison, SHAPE_POLY_SET::PM_FAST );
++
++    // additions = comparison - reference
++    result.additions = aComparison;
++    result.additions.BooleanSubtract( aReference, SHAPE_POLY_SET::PM_FAST );
++
++    // removals = reference - comparison
++    result.removals = aReference;
++    result.removals.BooleanSubtract( aComparison, SHAPE_POLY_SET::PM_FAST );
++
++    result.overlapArea = result.overlap.Area() * IU2_TO_MM2;
++    result.additionsArea = result.additions.Area() * IU2_TO_MM2;
++    result.removalsArea = result.removals.Area() * IU2_TO_MM2;
++
++    // reference = overlap ∪ removals, comparison = overlap ∪ additions (disjoint)
++    result.referenceArea = result.overlapArea + result.removalsArea;
++    result.comparisonArea = result.overlapArea + result.additionsArea;
++
++    if( result.referenceArea > 0.0 )
++    {
++        result.additionsPercent = 100.0 * result.additionsArea / result.referenceArea;
++        result.removalsPercent = 100.0 * result.removalsArea / result.referenceArea;
++        result.netChangePercent = result.additionsPercent - result.removalsPercent;
++    }
++
++    // Fracture so that holes become bridge-connected outlines suitable for rendering
++    // with PlotPoly (which only fills outlines, ignoring SHAPE_POLY_SET holes).
++    result.overlap.Fracture( SHAPE_POLY_SET::PM_FAST );
++    result.additions.Fracture( SHAPE_POLY_SET::PM_FAST );
++    result.removals.Fracture( SHAPE_POLY_SET::PM_FAST );
++
++    return result;
++}
++
++
++namespace
++{
++
++// Helper to convert mm^2 to other units
++double ConvertArea( double aMm2, DIFF_UNITS aUnits )
++{
++    switch( aUnits )
++    {
++    case DIFF_UNITS::MM: return aMm2;
++
++    case DIFF_UNITS::INCH: return aMm2 / ( 25.4 * 25.4 ); // mm^2 to in^2
++
++    case DIFF_UNITS::MILS: return aMm2 / ( 0.0254 * 0.0254 ); // mm^2 to mils^2
++    }
++
++    return aMm2;
++}
++
++
++wxString GetUnitSuffix( DIFF_UNITS aUnits )
++{
++    switch( aUnits )
++    {
++    case DIFF_UNITS::MM: return wxS( "mm" );
++    case DIFF_UNITS::INCH: return wxS( "in" );
++    case DIFF_UNITS::MILS: return wxS( "mils" );
++    }
++
++    return wxS( "mm" );
++}
++
++} // anonymous namespace
++
++
++wxString FormatDiffResultText( const GERBER_DIFF_RESULT& aResult, const wxString& aFile1, const wxString& aFile2,
++                               DIFF_UNITS aUnits )
++{
++    wxString suffix = GetUnitSuffix( aUnits );
++    wxString out;
++
++    out += wxString::Format( wxS( "Comparing: %s vs %s\n\n" ), aFile1, aFile2 );
++
++    out += wxString::Format( wxS( "Reference area:    %.2f %s^2\n" ), ConvertArea( aResult.referenceArea, aUnits ),
++                             suffix );
++    out += wxString::Format( wxS( "Comparison area:   %.2f %s^2\n" ), ConvertArea( aResult.comparisonArea, aUnits ),
++                             suffix );
++    out += wxString::Format( wxS( "Overlap area:      %.2f %s^2\n\n" ), ConvertArea( aResult.overlapArea, aUnits ),
++                             suffix );
++
++    wxString addSign = aResult.additionsPercent >= 0 ? wxS( "+" ) : wxS( "" );
++    wxString remSign = aResult.removalsPercent > 0 ? wxS( "-" ) : wxS( "" );
++    wxString netSign = aResult.netChangePercent >= 0 ? wxS( "+" ) : wxS( "" );
++
++    out += wxString::Format( wxS( "Additions:         %.2f %s^2 (%s%.2f%% of reference)\n" ),
++                             ConvertArea( aResult.additionsArea, aUnits ), suffix, addSign, aResult.additionsPercent );
++    out += wxString::Format( wxS( "Removals:          %.2f %s^2 (%s%.2f%% of reference)\n" ),
++                             ConvertArea( aResult.removalsArea, aUnits ), suffix, remSign, aResult.removalsPercent );
++    out += wxString::Format( wxS( "Net change:        %s%.2f %s^2 (%s%.2f%%)\n" ), netSign,
++                             ConvertArea( aResult.additionsArea - aResult.removalsArea, aUnits ), suffix, netSign,
++                             aResult.netChangePercent );
++
++    return out;
++}
++
++
++nlohmann::json FormatDiffResultJson( const GERBER_DIFF_RESULT& aResult, const wxString& aFile1, const wxString& aFile2,
++                                     DIFF_UNITS aUnits, double aMaxDiffPercent )
++{
++    wxString unitStr = GetUnitSuffix( aUnits );
++
++    nlohmann::json j;
++
++    j["reference_file"] = aFile1.ToStdString();
++    j["comparison_file"] = aFile2.ToStdString();
++    j["units"] = unitStr.ToStdString();
++
++    j["reference"] = { { "area", ConvertArea( aResult.referenceArea, aUnits ) } };
++
++    j["comparison"] = { { "area", ConvertArea( aResult.comparisonArea, aUnits ) } };
++
++    j["overlap"] = { { "area", ConvertArea( aResult.overlapArea, aUnits ) } };
++
++    j["additions"] = { { "area", ConvertArea( aResult.additionsArea, aUnits ) },
++                       { "percent", aResult.additionsPercent } };
++
++    j["removals"] = { { "area", ConvertArea( aResult.removalsArea, aUnits ) }, { "percent", aResult.removalsPercent } };
++
++    j["net_change"] = { { "area", ConvertArea( aResult.additionsArea - aResult.removalsArea, aUnits ) },
++                        { "percent", aResult.netChangePercent } };
++
++    // Determine if within threshold
++    double totalDiffPercent = aResult.additionsPercent + aResult.removalsPercent;
++    bool   withinThreshold =
++            ( aMaxDiffPercent <= 0.0 ) ? ( totalDiffPercent == 0.0 ) : ( totalDiffPercent <= aMaxDiffPercent );
++
++    j["within_threshold"] = withinThreshold;
++    j["max_diff_percent"] = aMaxDiffPercent;
++    j["total_diff_percent"] = totalDiffPercent;
++
++    return j;
++}
++
++// RenderDiffToPng(PNG_PLOTTER 版) は KiCad 8.0.9 には PNG プロッタが無いため除外。
++// PNG は kicad_gerber_main.cpp で Cairo を使って描く(ローカル修正)
+diff --git a/gerbview/gerber_diff.h b/gerbview/gerber_diff.h
+new file mode 100644
+index 00000000..ae782091
+--- /dev/null
++++ b/gerbview/gerber_diff.h
+@@ -0,0 +1,157 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright (C) 2025 KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#ifndef GERBER_DIFF_H
++#define GERBER_DIFF_H
++
++#include <geometry/shape_poly_set.h>
++#include <math/vector2d.h>
++#include <gal/color4d.h>
++#include <nlohmann/json_fwd.hpp>
++#include <wx/string.h>
++
++
++/**
++ * Result of a Gerber diff calculation containing the geometric differences
++ * and area statistics.
++ */
++struct GERBER_DIFF_RESULT
++{
++    SHAPE_POLY_SET overlap;   ///< Areas present in both files (file1 AND file2)
++    SHAPE_POLY_SET additions; ///< Areas in file2 but not file1 (file2 AND NOT file1)
++    SHAPE_POLY_SET removals;  ///< Areas in file1 but not file2 (file1 AND NOT file2)
++
++    double referenceArea;  ///< Total area of file1 in mm^2
++    double comparisonArea; ///< Total area of file2 in mm^2
++    double overlapArea;    ///< Area of overlap in mm^2
++    double additionsArea;  ///< Area of additions in mm^2
++    double removalsArea;   ///< Area of removals in mm^2
++
++    double additionsPercent; ///< Additions as percent of reference area
++    double removalsPercent;  ///< Removals as percent of reference area
++    double netChangePercent; ///< Net change as percent of reference area
++
++    GERBER_DIFF_RESULT() :
++            referenceArea( 0.0 ),
++            comparisonArea( 0.0 ),
++            overlapArea( 0.0 ),
++            additionsArea( 0.0 ),
++            removalsArea( 0.0 ),
++            additionsPercent( 0.0 ),
++            removalsPercent( 0.0 ),
++            netChangePercent( 0.0 )
++    {
++    }
++};
++
++
++/**
++ * Calculate the alignment offset to make a comparison poly set align with a reference.
++ *
++ * Uses bounding box origin alignment.
++ *
++ * @param aReference The reference poly set (will not be modified)
++ * @param aComparison The comparison poly set (offset will translate this to align)
++ * @return Translation vector to apply to aComparison to align with aReference
++ */
++VECTOR2I CalculateAlignment( const SHAPE_POLY_SET& aReference, const SHAPE_POLY_SET& aComparison );
++
++
++/**
++ * Calculate the geometric differences between two poly sets.
++ *
++ * Computes overlap, additions (in comparison but not reference), and removals
++ * (in reference but not comparison) using boolean operations.
++ *
++ * @param aReference The reference poly set
++ * @param aComparison The comparison poly set
++ * @return GERBER_DIFF_RESULT with geometry and statistics
++ */
++GERBER_DIFF_RESULT CalculateGerberDiff( const SHAPE_POLY_SET& aReference, const SHAPE_POLY_SET& aComparison );
++
++
++/**
++ * Units for diff result formatting.
++ */
++enum class DIFF_UNITS
++{
++    MM,
++    INCH,
++    MILS
++};
++
++
++/**
++ * Format a diff result as human-readable text.
++ *
++ * @param aResult The diff result to format
++ * @param aFile1 Name of the reference file
++ * @param aFile2 Name of the comparison file
++ * @param aUnits Output units for area values
++ * @return Formatted text string
++ */
++wxString FormatDiffResultText( const GERBER_DIFF_RESULT& aResult, const wxString& aFile1, const wxString& aFile2,
++                               DIFF_UNITS aUnits = DIFF_UNITS::MM );
++
++
++/**
++ * Format a diff result as JSON.
++ *
++ * @param aResult The diff result to format
++ * @param aFile1 Name of the reference file
++ * @param aFile2 Name of the comparison file
++ * @param aUnits Output units for area values
++ * @param aMaxDiffPercent Threshold for within_threshold field (0 = any diff fails)
++ * @return JSON object
++ */
++nlohmann::json FormatDiffResultJson( const GERBER_DIFF_RESULT& aResult, const wxString& aFile1, const wxString& aFile2,
++                                     DIFF_UNITS aUnits = DIFF_UNITS::MM, double aMaxDiffPercent = 0.0 );
++
++
++/**
++ * Options for diff PNG rendering.
++ */
++struct DIFF_RENDER_OPTIONS
++{
++    int  dpi = 300;
++    int  width = 0;  ///< 0 = calculate from DPI
++    int  height = 0; ///< 0 = calculate from DPI
++    bool antialias = true;
++
++    KIGFX::COLOR4D colorOverlap = KIGFX::COLOR4D( 0.5, 0.5, 0.5, 1.0 );    ///< Gray
++    KIGFX::COLOR4D colorAdditions = KIGFX::COLOR4D( 0.0, 1.0, 0.0, 1.0 );  ///< Green
++    KIGFX::COLOR4D colorRemovals = KIGFX::COLOR4D( 1.0, 0.0, 0.0, 1.0 );   ///< Red
++    KIGFX::COLOR4D colorBackground = KIGFX::COLOR4D( 1.0, 1.0, 1.0, 1.0 ); ///< White
++};
++
++
++/**
++ * Render a diff result to PNG with colored regions.
++ *
++ * Draws overlap in gray, additions in green, and removals in red.
++ *
++ * @param aResult The diff result containing geometry
++ * @param aOutputPath Path for the output PNG file
++ * @param aOptions Rendering options
++ * @return true on success, false on failure
++ */
++// RenderDiffToPng は 8.0.9 版では kicad_gerber_main.cpp の Cairo 実装に置き換え(ローカル修正)
++
++
++#endif // GERBER_DIFF_H
+diff --git a/gerbview/gerber_to_polyset.cpp b/gerbview/gerber_to_polyset.cpp
+new file mode 100644
+index 00000000..e623c35a
+--- /dev/null
++++ b/gerbview/gerber_to_polyset.cpp
+@@ -0,0 +1,124 @@
++// KiCad master gerbview/gerber_to_polyset.cpp を 8.0.9 向けに移植(ローカル修正)
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright (C) 2025 KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#include "gerber_to_polyset.h"
++#include "gerber_file_image.h"
++#include "gerber_draw_item.h"
++#include "dcode.h"
++#include <convert_basic_shapes_to_polygon.h>
++
++
++SHAPE_POLY_SET ConvertGerberToPolySet( GERBER_FILE_IMAGE* aImage, int aTolerance )
++{
++    SHAPE_POLY_SET mergedPolygons;
++
++    if( !aImage )
++        return mergedPolygons;
++
++    // Accumulate positive and negative items separately, then perform a single boolean
++    // pass for each negative object: a negative object erase only previously drawn items.
++    SHAPE_POLY_SET positivePolygons;
++    SHAPE_POLY_SET negativePolygons;
++
++    for( GERBER_DRAW_ITEM* item : aImage->GetItems() )
++    {
++        SHAPE_POLY_SET itemPoly;
++        bool           needsFlashOffset = false;
++
++        if( item->m_ShapeAsPolygon.OutlineCount() > 0 )
++        {
++            itemPoly = item->m_ShapeAsPolygon;
++        }
++        else if( item->m_ShapeType == GBR_SEGMENT )
++        {
++            D_CODE* dcode = item->GetDcodeDescr();
++
++            if( dcode && dcode->m_ApertType != APT_RECT )
++            {
++                int arcError = static_cast<int>( gerbIUScale.IU_PER_MM * 0.02 )  /* 8.0.9: ARC_LOW_DEF_MM は 9 以降。値は同じ 0.02mm */;
++                TransformOvalToPolygon( itemPoly, item->m_Start, item->m_End,
++                                        item->m_Size.x, arcError, ERROR_INSIDE );
++            }
++            else
++            {
++                item->ConvertSegmentToPolygon( &itemPoly );
++            }
++        }
++        else if( item->m_ShapeType == GBR_ARC )
++        {
++            item->ConvertSegmentToPolygon( &itemPoly );
++        }
++        else if( item->m_Flashed )
++        {
++            D_CODE* dcode = item->GetDcodeDescr();
++
++            if( dcode )
++            {
++                dcode->ConvertShapeToPolygon( item );
++                itemPoly = dcode->m_Polygon;
++                needsFlashOffset = true;
++            }
++        }
++
++        if( itemPoly.OutlineCount() == 0 )
++            continue;
++
++        // Flashed shapes from ConvertShapeToPolygon are centered at (0,0).
++        // Offset by the item's position before applying the AB transform.
++        VECTOR2I offset = needsFlashOffset ? VECTOR2I( item->m_Start ) : VECTOR2I( 0, 0 );
++
++        SHAPE_POLY_SET& dest = item->GetLayerPolarity() ? negativePolygons : positivePolygons;
++
++        for( int i = 0; i < itemPoly.OutlineCount(); i++ )
++        {
++            const SHAPE_LINE_CHAIN& outline = itemPoly.COutline( i );
++            dest.NewOutline();
++
++            for( int j = 0; j < outline.PointCount(); j++ )
++                dest.Append( item->GetABPosition( outline.CPoint( j ) + offset ) );
++
++            for( int h = 0; h < itemPoly.HoleCount( i ); h++ )
++            {
++                const SHAPE_LINE_CHAIN& hole = itemPoly.CHole( i, h );
++                dest.NewHole();
++
++                for( int j = 0; j < hole.PointCount(); j++ )
++                    dest.Append( item->GetABPosition( hole.CPoint( j ) + offset ) );
++            }
++        }
++
++        // Handle negative polygons: they are subtracted to previous polygons
++        if( negativePolygons.OutlineCount() > 0 )
++        {
++            positivePolygons.BooleanSubtract( negativePolygons, SHAPE_POLY_SET::PM_FAST );
++            negativePolygons.RemoveAllContours();
++        }
++    }
++
++    // Single-pass union of all positive items
++    positivePolygons.Simplify( SHAPE_POLY_SET::PM_FAST );
++
++    mergedPolygons = std::move( positivePolygons );
++
++    if( aTolerance > 0 )
++        mergedPolygons.Inflate( aTolerance, CORNER_STRATEGY::ROUND_ALL_CORNERS, 16 );
++
++    return mergedPolygons;
++}
+diff --git a/gerbview/gerber_to_polyset.h b/gerbview/gerber_to_polyset.h
+new file mode 100644
+index 00000000..e8bc85b3
+--- /dev/null
++++ b/gerbview/gerber_to_polyset.h
+@@ -0,0 +1,43 @@
++/*
++ * This program source code file is part of KiCad, a free EDA CAD application.
++ *
++ * Copyright (C) 2025 KiCad Developers, see AUTHORS.txt for contributors.
++ *
++ * This program is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation, either version 3 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#ifndef GERBER_TO_POLYSET_H
++#define GERBER_TO_POLYSET_H
++
++#include <geometry/shape_poly_set.h>
++
++class GERBER_FILE_IMAGE;
++
++
++/**
++ * Convert a GERBER_FILE_IMAGE to a merged SHAPE_POLY_SET.
++ *
++ * All draw items in the Gerber image are converted to polygons and merged
++ * using boolean union. This handles step-and-repeat expansion.
++ *
++ * Note: This function may populate cached polygon data in the draw items.
++ *
++ * @param aImage The Gerber file image to convert
++ * @param aTolerance Optional inflation tolerance in nm for comparison purposes
++ * @return A merged SHAPE_POLY_SET containing all copper areas
++ */
++SHAPE_POLY_SET ConvertGerberToPolySet( GERBER_FILE_IMAGE* aImage, int aTolerance = 0 );
++
++
++#endif // GERBER_TO_POLYSET_H
+diff --git a/gerbview/kicad_gerber_main.cpp b/gerbview/kicad_gerber_main.cpp
+new file mode 100644
+index 00000000..c8609809
+--- /dev/null
++++ b/gerbview/kicad_gerber_main.cpp
+@@ -0,0 +1,569 @@
++/*
++ * kicad_gerber: ガーバー/ドリルの情報表示と差分(画面なし)。KiCad 11 の "kicad-cli gerber" を参考に、
++ * 8.0.9 の gerbview の読み込み部品で作ったローカルのコマンド。
++ *
++ *   kicad_gerber info <ファイル>
++ *   kicad_gerber diff <基準> <比較> [--png 出力.png] [--dpi N]
++ *   kicad_gerber dirdiff <基準フォルダ> <比較フォルダ> --out <出力フォルダ> [--dpi N]
++ *
++ * 差分画像: 灰=両方にある / 赤=基準にだけある(消えた) / 緑=比較にだけある(増えた)。
++ * 差のある場所は青い枠と番号で囲み、座標(mm、KiCad の基板座標)を一覧にする。
++ *
++ * 差分の計算と図形への変換は KiCad master の gerber_diff.cpp / gerber_to_polyset.cpp を移植したもの。
++ * PNG の描画は 8.0.9 に PNG プロッタが無いため Cairo で描く。
++ */
++
++#include <cstdio>
++#include <cstdlib>
++#include <cmath>
++#include <map>
++#include <memory>
++#include <string>
++#include <vector>
++#include <algorithm>
++
++#include <cairo.h>
++
++#include <wx/app.h>
++#include <wx/dir.h>
++#include <wx/filename.h>
++#include <wx/ffile.h>
++
++#include <pgm_base.h>
++#include <kiway.h>
++#include <base_units.h>
++#include <geometry/shape_poly_set.h>
++
++#include "gerber_file_image.h"
++#include "excellon_image.h"
++#include "X2_gerber_attributes.h"
++#include "excellon_defaults.h"
++#include "gerber_to_polyset.h"
++#include "gerber_diff.h"
++
++
++struct HEADLESS_PGM : public PGM_BASE
++{
++    bool OnPgmInit() { return true; }
++    void OnPgmExit() { PGM_BASE::Destroy(); }
++    void MacOpenFile( const wxString& ) override {}
++};
++
++static HEADLESS_PGM g_pgm;
++
++struct HEADLESS_APP : public wxApp
++{
++    bool OnInit() override { return true; }
++};
++
++IMPLEMENT_APP_NO_MAIN( HEADLESS_APP );
++
++
++static double mm( double aIU )
++{
++    return aIU / GERB_IU_PER_MM;
++}
++
++
++static bool isExcellon( const wxString& aPath )
++{
++    wxString ext = wxFileName( aPath ).GetExt().Lower();
++
++    if( ext == wxS( "drl" ) || ext == wxS( "xln" ) || ext == wxS( "exc" ) || ext == wxS( "ncd" ) )
++        return true;
++
++    // 拡張子で分からなければ先頭を見る(Excellon は M48 で始まる)
++    wxFFile f( aPath, wxS( "r" ) );
++    char    buf[64] = { 0 };
++
++    if( f.IsOpened() )
++        f.Read( buf, sizeof( buf ) - 1 );
++
++    return std::string( buf ).find( "M48" ) != std::string::npos;
++}
++
++
++static std::unique_ptr<GERBER_FILE_IMAGE> loadImage( const wxString& aPath )
++{
++    if( isExcellon( aPath ) )
++    {
++        auto              img = std::make_unique<EXCELLON_IMAGE>( 0 );
++        EXCELLON_DEFAULTS defaults;   // gerbview の既定値(ファイル内の指定が優先される)
++
++        if( !img->LoadFile( aPath, &defaults ) )
++            return nullptr;
++
++        return img;
++    }
++
++    auto img = std::make_unique<GERBER_FILE_IMAGE>( 0 );
++
++    if( !img->LoadGerberFile( aPath ) )
++        return nullptr;
++
++    return img;
++}
++
++
++struct REGION
++{
++    BOX2I  box;
++    double addArea = 0;   // mm²
++    double remArea = 0;
++};
++
++
++// 追加・削除の図形を、近いもの(0.5mm 以内)どうしまとめて「差のある場所」にする
++static std::vector<REGION> findRegions( const SHAPE_POLY_SET& aAdd, const SHAPE_POLY_SET& aRem,
++                                        double aMinAreaMm2 )
++{
++    std::vector<REGION> regs;
++    const int           gap = (int) ( 0.5 * GERB_IU_PER_MM );
++
++    auto collect = [&]( const SHAPE_POLY_SET& aSet, bool aIsAdd )
++    {
++        for( int i = 0; i < aSet.OutlineCount(); i++ )
++        {
++            SHAPE_POLY_SET one;
++            one.AddOutline( aSet.COutline( i ) );
++
++            for( int h = 0; h < aSet.HoleCount( i ); h++ )
++                one.AddHole( aSet.CHole( i, h ) );
++
++            double area = one.Area() * 1e-10;
++
++            if( area < aMinAreaMm2 )
++                continue;
++
++            REGION r;
++            r.box = one.BBox();
++            ( aIsAdd ? r.addArea : r.remArea ) = area;
++            regs.push_back( r );
++        }
++    };
++
++    collect( aAdd, true );
++    collect( aRem, false );
++
++    // 近い箱を繰り返しまとめる
++    bool merged = true;
++
++    while( merged )
++    {
++        merged = false;
++
++        for( size_t i = 0; i < regs.size() && !merged; i++ )
++        {
++            BOX2I bi = regs[i].box;
++            bi.Inflate( gap );
++
++            for( size_t j = i + 1; j < regs.size(); j++ )
++            {
++                if( bi.Intersects( regs[j].box ) )
++                {
++                    regs[i].box.Merge( regs[j].box );
++                    regs[i].addArea += regs[j].addArea;
++                    regs[i].remArea += regs[j].remArea;
++                    regs.erase( regs.begin() + j );
++                    merged = true;
++                    break;
++                }
++            }
++        }
++    }
++
++    std::sort( regs.begin(), regs.end(), []( const REGION& a, const REGION& b )
++               { return a.addArea + a.remArea > b.addArea + b.remArea; } );
++    return regs;
++}
++
++
++static void pathPolySet( cairo_t* cr, const SHAPE_POLY_SET& aSet, const BOX2I& aView, double aScale,
++                         int aMargin )
++{
++    for( int i = 0; i < aSet.OutlineCount(); i++ )
++    {
++        auto addChain = [&]( const SHAPE_LINE_CHAIN& ch )
++        {
++            for( int k = 0; k < ch.PointCount(); k++ )
++            {
++                double x = aMargin + ( ch.CPoint( k ).x - aView.GetLeft() ) * aScale;
++                double y = aMargin + ( ch.CPoint( k ).y - aView.GetTop() ) * aScale;
++
++                if( k == 0 )
++                    cairo_move_to( cr, x, y );
++                else
++                    cairo_line_to( cr, x, y );
++            }
++
++            cairo_close_path( cr );
++        };
++
++        addChain( aSet.COutline( i ) );
++
++        for( int h = 0; h < aSet.HoleCount( i ); h++ )
++            addChain( aSet.CHole( i, h ) );
++    }
++}
++
++
++static bool renderDiffPng( const GERBER_DIFF_RESULT& aRes, const SHAPE_POLY_SET& aRef, const SHAPE_POLY_SET& aCmp,
++                           const std::vector<REGION>& aRegions, const wxString& aTitle, const wxString& aPath,
++                           int aDpi )
++{
++    BOX2I view = aRef.BBox();
++    view.Merge( aCmp.BBox() );
++
++    if( view.GetWidth() <= 0 || view.GetHeight() <= 0 )
++        return false;
++
++    const double scale = aDpi / 25.4 / GERB_IU_PER_MM;   // px / IU
++    const int    margin = 40;
++    const int    header = 70;
++    int          w = (int) ( view.GetWidth() * scale ) + 2 * margin;
++    int          h = (int) ( view.GetHeight() * scale ) + 2 * margin + header;
++
++    // 大きすぎる画像にしない(長辺 8000px まで)
++    double shrink = std::min( 1.0, 8000.0 / std::max( w, h ) );
++
++    cairo_surface_t* surf = cairo_image_surface_create( CAIRO_FORMAT_RGB24, (int) ( w * shrink ),
++                                                        (int) ( h * shrink ) );
++    cairo_t*         cr = cairo_create( surf );
++    cairo_scale( cr, shrink, shrink );
++    cairo_set_fill_rule( cr, CAIRO_FILL_RULE_EVEN_ODD );
++
++    cairo_set_source_rgb( cr, 1, 1, 1 );
++    cairo_paint( cr );
++
++    // 見出しと凡例
++    cairo_select_font_face( cr, "IPAexGothic", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL );
++    cairo_set_font_size( cr, 18 );
++    cairo_set_source_rgb( cr, 0, 0, 0 );
++    cairo_move_to( cr, 12, 26 );
++    cairo_show_text( cr, aTitle.utf8_str() );
++
++    struct LEG { double r, g, b; const char* t; } legs[] = {
++        { 0.62, 0.62, 0.62, "両方にある" }, { 0.85, 0.1, 0.1, "消えた(基準にだけある)" },
++        { 0.1, 0.65, 0.1, "増えた(比較にだけある)" }, { 0.1, 0.3, 0.95, "差のある場所" } };
++    double lx = 12;
++
++    cairo_set_font_size( cr, 15 );
++
++    for( const LEG& l : legs )
++    {
++        cairo_set_source_rgb( cr, l.r, l.g, l.b );
++        cairo_rectangle( cr, lx, 40, 18, 18 );
++        cairo_fill( cr );
++        cairo_set_source_rgb( cr, 0, 0, 0 );
++        cairo_move_to( cr, lx + 24, 54 );
++        cairo_show_text( cr, l.t );
++        cairo_text_extents_t ext;
++        cairo_text_extents( cr, l.t, &ext );
++        lx += 24 + ext.x_advance + 24;
++    }
++
++    cairo_translate( cr, 0, header );
++
++    auto fill = [&]( const SHAPE_POLY_SET& s, double r, double g, double b )
++    {
++        cairo_new_path( cr );
++        pathPolySet( cr, s, view, scale, margin );
++        cairo_set_source_rgb( cr, r, g, b );
++        cairo_fill( cr );
++    };
++
++    fill( aRes.overlap, 0.62, 0.62, 0.62 );
++    fill( aRes.removals, 0.85, 0.1, 0.1 );
++    fill( aRes.additions, 0.1, 0.65, 0.1 );
++
++    // 差のある場所を青枠と番号で囲む
++    cairo_set_line_width( cr, 2.5 );
++    cairo_set_font_size( cr, 16 );
++
++    for( size_t i = 0; i < aRegions.size() && i < 50; i++ )
++    {
++        BOX2I b = aRegions[i].box;
++        b.Inflate( (int) ( 0.4 * GERB_IU_PER_MM ) );
++        double x = margin + ( b.GetLeft() - view.GetLeft() ) * scale;
++        double y = margin + ( b.GetTop() - view.GetTop() ) * scale;
++        cairo_set_source_rgb( cr, 0.1, 0.3, 0.95 );
++        cairo_rectangle( cr, x, y, b.GetWidth() * scale, b.GetHeight() * scale );
++        cairo_stroke( cr );
++        cairo_move_to( cr, x, y - 4 );
++        cairo_show_text( cr, std::to_string( i + 1 ).c_str() );
++    }
++
++    cairo_destroy( cr );
++    cairo_status_t st = cairo_surface_write_to_png( surf, aPath.utf8_str() );
++    cairo_surface_destroy( surf );
++    return st == CAIRO_STATUS_SUCCESS;
++}
++
++
++struct DIFF_OUT
++{
++    bool                ok = false;
++    GERBER_DIFF_RESULT  res;
++    std::vector<REGION> regions;
++    wxString            error;
++};
++
++
++static DIFF_OUT diffFiles( const wxString& aRef, const wxString& aCmp, const wxString& aPng, int aDpi,
++                           const wxString& aTitle )
++{
++    DIFF_OUT out;
++    auto     ref = loadImage( aRef );
++    auto     cmp = loadImage( aCmp );
++
++    if( !ref || !cmp )
++    {
++        out.error = wxS( "読み込めない: " ) + ( ref ? aCmp : aRef );
++        return out;
++    }
++
++    SHAPE_POLY_SET pr = ConvertGerberToPolySet( ref.get() );
++    SHAPE_POLY_SET pc = ConvertGerberToPolySet( cmp.get() );
++
++    out.res = CalculateGerberDiff( pr, pc );
++    out.regions = findRegions( out.res.additions, out.res.removals, 0.0005 );
++    out.ok = true;
++
++    if( !aPng.IsEmpty() )
++        renderDiffPng( out.res, pr, pc, out.regions, aTitle, aPng, aDpi );
++
++    return out;
++}
++
++
++static wxString regionText( const REGION& r )
++{
++    // gerbview の内部座標は画面向き(Y 下向き)で、KiCad の基板座標と同じ向き・同じ原点になる
++    VECTOR2I c = r.box.Centre();
++    wxString what = r.addArea > 0 && r.remArea > 0 ? wxS( "形が変わった" )
++                    : r.addArea > 0                ? wxS( "増えた" )
++                                                   : wxS( "消えた" );
++    return wxString::Format( "中心 (%.2f, %.2f) 大きさ %.2f×%.2fmm  %s(+%.3f / -%.3f mm²)", mm( c.x ), mm( c.y ),
++                             mm( r.box.GetWidth() ), mm( r.box.GetHeight() ), what, r.addArea, r.remArea );
++}
++
++
++static int cmdInfo( const wxString& aPath )
++{
++    auto img = loadImage( aPath );
++
++    if( !img )
++    {
++        printf( "読み込めない: %s\n", (const char*) aPath.utf8_str() );
++        return 1;
++    }
++
++    SHAPE_POLY_SET p = ConvertGerberToPolySet( img.get() );
++    BOX2I          b = p.BBox();
++    int            flashes = 0, draws = 0;
++
++    for( GERBER_DRAW_ITEM* it : img->GetItems() )
++        ( it->m_Flashed ? flashes : draws )++;
++
++    printf( "%s\n", (const char*) aPath.utf8_str() );
++    printf( "  種類: %s\n", isExcellon( aPath ) ? "ドリル(Excellon)" : "ガーバー" );
++
++    if( img->m_FileFunction )
++        printf( "  用途(FileFunction): %s %s\n", (const char*) img->m_FileFunction->GetFileType().utf8_str(),
++                (const char*) img->m_FileFunction->GetBrdLayerId().utf8_str() );
++
++    printf( "  図形: %zu 個(フラッシュ %d / 線など %d)\n", img->GetItems().size(), flashes, draws );
++    printf( "  範囲: (%.2f, %.2f) - (%.2f, %.2f) mm、%.2f×%.2f mm\n", mm( b.GetLeft() ), mm( b.GetTop() ),
++            mm( b.GetRight() ), mm( b.GetBottom() ), mm( b.GetWidth() ), mm( b.GetHeight() ) );
++    printf( "  塗られている面積: %.2f mm²\n", p.Area() * 1e-10 );
++    return 0;
++}
++
++
++static void printDiff( const DIFF_OUT& d )
++{
++    printf( "  基準 %.2f mm² / 比較 %.2f mm² / 増えた %.3f mm² / 消えた %.3f mm²\n", d.res.referenceArea,
++            d.res.comparisonArea, d.res.additionsArea, d.res.removalsArea );
++
++    if( d.regions.empty() )
++    {
++        printf( "  差なし\n" );
++        return;
++    }
++
++    printf( "  差のある場所 %zu か所(面積の大きい順):\n", d.regions.size() );
++
++    for( size_t i = 0; i < d.regions.size() && i < 30; i++ )
++        printf( "    %2zu. %s\n", i + 1, (const char*) regionText( d.regions[i] ).utf8_str() );
++
++    if( d.regions.size() > 30 )
++        printf( "    ...ほか %zu か所\n", d.regions.size() - 30 );
++}
++
++
++static int cmdDirDiff( const wxString& aRefDir, const wxString& aCmpDir, const wxString& aOutDir, int aDpi )
++{
++    wxFileName::Mkdir( aOutDir, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL );
++    wxDir                 dir( aRefDir );
++    wxString              name;
++    std::vector<wxString> names;
++
++    for( bool ok = dir.GetFirst( &name, wxEmptyString, wxDIR_FILES ); ok; ok = dir.GetNext( &name ) )
++        names.push_back( name );
++
++    std::sort( names.begin(), names.end() );
++
++    wxString md = wxS( "# 製造データの差分\n\n" );
++    md += wxS( "- 基準: `" ) + aRefDir + wxS( "`\n- 比較: `" ) + aCmpDir + wxS( "`\n" );
++    md += wxS( "- 画像: 灰=両方にある / 赤=消えた(基準にだけある) / 緑=増えた(比較にだけある) / 青枠=差のある場所\n" );
++    md += wxS( "- 座標は mm(KiCad の基板座標)\n\n" );
++    md += wxS( "| ファイル | 増えた mm² | 消えた mm² | 差のある場所 |\n|---|---:|---:|---:|\n" );
++    wxString details;
++    int      changed = 0;
++
++    for( const wxString& n : names )
++    {
++        wxString ext = wxFileName( n ).GetExt().Lower();
++
++        if( ext == wxS( "gbrjob" ) || ext == wxS( "md" ) || ext == wxS( "png" ) || ext == wxS( "json" ) )
++            continue;
++
++        wxFileName fr( aRefDir, n ), fc( aCmpDir, n );
++
++        if( !fc.FileExists() )
++        {
++            md += wxS( "| " ) + n + wxS( " | — | — | 比較側に無い |\n" );
++            continue;
++        }
++
++        wxString png = wxFileName( aOutDir, wxFileName( n ).GetName() + wxS( "_" ) + ext + wxS( "_diff.png" ) )
++                               .GetFullPath();
++        DIFF_OUT d = diffFiles( fr.GetFullPath(), fc.GetFullPath(), wxEmptyString, aDpi, n );
++
++        if( !d.ok )
++        {
++            md += wxS( "| " ) + n + wxS( " | — | — | " ) + d.error + wxS( " |\n" );
++            continue;
++        }
++
++        printf( "%s\n", (const char*) n.utf8_str() );
++        printDiff( d );
++
++        md += wxString::Format( "| %s | %.3f | %.3f | %zu |\n", n, d.res.additionsArea, d.res.removalsArea,
++                                d.regions.size() );
++
++        if( !d.regions.empty() )
++        {
++            changed++;
++            diffFiles( fr.GetFullPath(), fc.GetFullPath(), png, aDpi, n );   // 差がある層だけ画像にする
++            details += wxS( "\n## " ) + n + wxS( "\n\n![](" ) + wxFileName( png ).GetFullName() + wxS( ")\n\n" );
++
++            for( size_t i = 0; i < d.regions.size() && i < 30; i++ )
++                details += wxString::Format( "%zu. %s\n", i + 1, regionText( d.regions[i] ) );
++        }
++    }
++
++    // 比較側にだけあるファイル
++    wxDir dc( aCmpDir );
++
++    for( bool ok = dc.GetFirst( &name, wxEmptyString, wxDIR_FILES ); ok; ok = dc.GetNext( &name ) )
++        if( !wxFileName( aRefDir, name ).FileExists() && wxFileName( name ).GetExt().Lower() != wxS( "gbrjob" ) )
++            md += wxS( "| " ) + name + wxS( " | — | — | 基準側に無い |\n" );
++
++    md += wxString::Format( "\n差のあったファイル: %d\n", changed );
++    md += details;
++
++    wxFFile f( wxFileName( aOutDir, wxS( "差分まとめ.md" ) ).GetFullPath(), wxS( "w" ) );
++
++    if( f.IsOpened() )
++        f.Write( md, wxConvUTF8 );
++
++    printf( "\n差のあったファイル: %d(まとめ: %s/差分まとめ.md)\n", changed, (const char*) aOutDir.utf8_str() );
++    return 0;
++}
++
++
++static void usage()
++{
++    printf( "%s", R"(kicad-gerber: ガーバー/ドリルの情報と差分(KiCad 8.0.9 の gerbview の読み込み部品を使用)
++
++  kicad-gerber info <ファイル>
++  kicad-gerber diff <基準> <比較> [--png 出力.png] [--dpi N(既定 400)]
++  kicad-gerber dirdiff <基準フォルダ> <比較フォルダ> --out <出力フォルダ> [--dpi N]
++
++差分画像: 灰=両方にある / 赤=消えた(基準にだけある) / 緑=増えた(比較にだけある) / 青枠と番号=差のある場所
++基板ファイルどうしを比べるときは kicad-local fabdiff <基板A> <基板B> が便利(ガーバーとドリルを出して比べる)
++)" );
++}
++
++
++int main( int argc, char** argv )
++{
++    if( argc < 3 )
++    {
++        usage();
++        return argc < 2 ? 2 : 0;
++    }
++
++    wxInitialize( argc, argv );
++    int kifaceVersion = 0;
++    KIFACE_GETTER( &kifaceVersion, KIFACE_VERSION, &g_pgm );
++    g_pgm.InitPgm( true, true );
++
++    std::string              cmd = argv[1];
++    std::vector<std::string> pos;
++    wxString                 png, outDir;
++    int                      dpi = 400;
++
++    for( int i = 2; i < argc; i++ )
++    {
++        std::string a = argv[i];
++
++        if( a == "--png" && i + 1 < argc )
++            png = wxString::FromUTF8( argv[++i] );
++        else if( a == "--out" && i + 1 < argc )
++            outDir = wxString::FromUTF8( argv[++i] );
++        else if( a == "--dpi" && i + 1 < argc )
++            dpi = std::atoi( argv[++i] );
++        else
++            pos.push_back( a );
++    }
++
++    int rc = 2;
++
++    if( cmd == "info" && pos.size() == 1 )
++    {
++        rc = cmdInfo( wxString::FromUTF8( pos[0] ) );
++    }
++    else if( cmd == "diff" && pos.size() == 2 )
++    {
++        wxString a = wxString::FromUTF8( pos[0] ), b = wxString::FromUTF8( pos[1] );
++        DIFF_OUT d = diffFiles( a, b, png, dpi, wxFileName( a ).GetFullName() + wxS( " → " ) + wxFileName( b ).GetFullName() );
++
++        if( !d.ok )
++        {
++            printf( "%s\n", (const char*) d.error.utf8_str() );
++            rc = 1;
++        }
++        else
++        {
++            printDiff( d );
++
++            if( !png.IsEmpty() )
++                printf( "差分画像: %s\n", (const char*) png.utf8_str() );
++
++            rc = d.regions.empty() ? 0 : 1;   // 差があれば 1(スクリプトで判定しやすいように)
++        }
++    }
++    else if( cmd == "dirdiff" && pos.size() == 2 && !outDir.IsEmpty() )
++    {
++        rc = cmdDirDiff( wxString::FromUTF8( pos[0] ), wxString::FromUTF8( pos[1] ), outDir, dpi );
++    }
++    else
++    {
++        usage();
++    }
++
++    fflush( stdout );
++    std::_Exit( rc );
++}
+-- 
+2.43.0
+

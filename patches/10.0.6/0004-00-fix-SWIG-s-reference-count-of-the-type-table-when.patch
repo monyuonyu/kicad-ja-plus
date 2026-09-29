@@ -1,0 +1,86 @@
+From e0254165d02bd5d212b0f9a40ec664a4a32140de Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Tue, 29 Sep 2026 07:37:20 +0900
+Subject: [PATCH 04/29] 00: fix SWIG's reference count of the type table when
+ thisown is changed (Remove() in scripts)
+
+---
+ pcbnew/CMakeLists.txt                      |  4 ++
+ tools/build/fix_swig_ownership_refcount.py | 50 ++++++++++++++++++++++
+ 2 files changed, 54 insertions(+)
+ create mode 100644 tools/build/fix_swig_ownership_refcount.py
+
+diff --git a/pcbnew/CMakeLists.txt b/pcbnew/CMakeLists.txt
+index 276772bb..e5a69718 100644
+--- a/pcbnew/CMakeLists.txt
++++ b/pcbnew/CMakeLists.txt
+@@ -606,6 +606,10 @@ add_custom_command( OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${KICMAKE_CFG_INTDIR}/pcb
+     COMMAND ${SWIG_EXECUTABLE}
+         ${SWIG_OPTS} -MMD -MF ${CMAKE_CURRENT_BINARY_DIR}/${KICMAKE_CFG_INTDIR}/pcbnew_wrap.d -MT pcbnew/pcbnew_wrap.cxx -o ${CMAKE_CURRENT_BINARY_DIR}/${KICMAKE_CFG_INTDIR}/pcbnew_wrap.cxx ${CMAKE_SOURCE_DIR}/pcbnew/python/swig/pcbnew.i
+ 
++    # SWIG の所有権切り替え(thisown)で型の対応表が壊れる不具合を直す(ローカル修正)
++    COMMAND ${PYTHON_EXECUTABLE}
++        ${CMAKE_SOURCE_DIR}/tools/build/fix_swig_ownership_refcount.py ${CMAKE_CURRENT_BINARY_DIR}/pcbnew_wrap.cxx
++
+ #was needed only with SWIG version < 4 to disable a python section "def swig_import_helper()"
+ #found in pcbnew.py but not existing in SWIG version >= 4
+ #So it is left                               here for documentation purpose
+diff --git a/tools/build/fix_swig_ownership_refcount.py b/tools/build/fix_swig_ownership_refcount.py
+new file mode 100644
+index 00000000..ba51a280
+--- /dev/null
++++ b/tools/build/fix_swig_ownership_refcount.py
+@@ -0,0 +1,50 @@
++#!/usr/bin/env python3
++"""
++SWIG 4.x の Python ランタイムの不具合を、生成されたラッパーに対して直す。
++
++SwigPyObject_New() は所有権付き(SWIG_POINTER_OWN)で作ったオブジェクトについてだけ
++Swig_Capsule_global の参照数を増やし、SwigPyObject_dealloc() は所有権付きなら必ず減らす。
++ところが後から thisown=1 にする acquire() と thisown=0 にする disown() は参照数を変えない。
++KiCad の BOARD_ITEM_CONTAINER.Remove() は thisown=1 にするので、外した部品や配線を Python が
++解放するたびに参照数が1つ余計に減り、0 になった時点で型の対応表(clientdata)が破棄される。
++以後、あらゆる戻り値が生の SwigPyObject になり、GetFootprints() などが使えなくなる。
++
++acquire/disown でも参照数を増減させて辻褄を合わせる。
++"""
++import sys
++
++path = sys.argv[1]
++src = open(path, encoding="utf-8").read()
++
++acquire_old = """SwigPyObject_acquire(PyObject* v, PyObject *SWIGUNUSEDPARM(args))
++{
++  SwigPyObject *sobj = (SwigPyObject *)v;
++  sobj->own = SWIG_POINTER_OWN;"""
++acquire_new = """SwigPyObject_acquire(PyObject* v, PyObject *SWIGUNUSEDPARM(args))
++{
++  SwigPyObject *sobj = (SwigPyObject *)v;
++  if (sobj->own != SWIG_POINTER_OWN)
++    Py_XINCREF(Swig_Capsule_global);  /* KiCad: dealloc で減らす分を先に持つ */
++  sobj->own = SWIG_POINTER_OWN;"""
++
++disown_old = """SwigPyObject_disown(PyObject* v, PyObject *SWIGUNUSEDPARM(args))
++{
++  SwigPyObject *sobj = (SwigPyObject *)v;
++  sobj->own = 0;"""
++disown_new = """SwigPyObject_disown(PyObject* v, PyObject *SWIGUNUSEDPARM(args))
++{
++  SwigPyObject *sobj = (SwigPyObject *)v;
++  if (sobj->own == SWIG_POINTER_OWN)
++    Py_XDECREF(Swig_Capsule_global);  /* KiCad: 所有権を手放したら dealloc では減らさない */
++  sobj->own = 0;"""
++
++if "KiCad: dealloc で減らす分を先に持つ" in src:
++    sys.exit(0)  # 適用済み
++
++for old, new, name in ((acquire_old, acquire_new, "acquire"), (disown_old, disown_new, "disown")):
++    if src.count(old) != 1:
++        sys.exit(f"fix_swig_ownership_refcount: SwigPyObject_{name} の想定した形が見つからない "
++                 f"(SWIG の版が変わった可能性)。{path}")
++    src = src.replace(old, new)
++
++open(path, "w", encoding="utf-8").write(src)
+-- 
+2.43.0
+

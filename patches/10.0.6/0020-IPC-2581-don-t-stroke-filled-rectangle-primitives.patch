@@ -1,0 +1,101 @@
+From 32f11ebed9e4e613505650bfee274decf6506c6a Mon Sep 17 00:00:00 2001
+From: Akhil Velagapudi <akhilvelagapudi@gmail.com>
+Date: Tue, 29 Sep 2026 08:37:37 +0900
+Subject: [PATCH 20/29] IPC-2581: don't stroke filled rectangle primitives
+
+From KiCad MR !2667 (https://gitlab.com/kicad/code/kicad/-/merge_requests/2667), applied with fuzz to 10.0.6.
+---
+ common/hash_eda.cpp                      |  3 ++
+ pcbnew/pcb_io/ipc2581/pcb_io_ipc2581.cpp | 44 +++++++++++-------------
+ 2 files changed, 24 insertions(+), 23 deletions(-)
+
+diff --git a/common/hash_eda.cpp b/common/hash_eda.cpp
+index a7c9bcb1..6479c83d 100644
+--- a/common/hash_eda.cpp
++++ b/common/hash_eda.cpp
+@@ -243,6 +243,9 @@ size_t hash_fp_item( const EDA_ITEM* aItem, int aFlags )
+         hash_combine( ret, shape->GetWidth() );
+         hash_combine( ret, shape->GetFillMode() );
+         hash_combine( ret, shape->GetLineStyle() );
++        if( shape->GetShape() == SHAPE_T::RECTANGLE )
++            hash_combine( ret, shape->GetCornerRadius() );
++
+ 
+         if( shape->GetShape() == SHAPE_T::ARC || shape->GetShape() == SHAPE_T::CIRCLE )
+             hash_combine( ret, shape->GetRadius() );
+diff --git a/pcbnew/pcb_io/ipc2581/pcb_io_ipc2581.cpp b/pcbnew/pcb_io/ipc2581/pcb_io_ipc2581.cpp
+index f009539e..2c0c946b 100644
+--- a/pcbnew/pcb_io/ipc2581/pcb_io_ipc2581.cpp
++++ b/pcbnew/pcb_io/ipc2581/pcb_io_ipc2581.cpp
+@@ -653,14 +653,7 @@ size_t PCB_IO_IPC2581::lineHash( int aWidth, LINE_STYLE aDashType )
+ 
+ size_t PCB_IO_IPC2581::shapeHash( const PCB_SHAPE& aShape )
+ {
+-    size_t hash = hash_fp_item( &aShape, HASH_POS | REL_COORD );
+-
+-    // hash_fp_item does not distinguish rectangles by their corner radius, so two rects that
+-    // differ only in radius would otherwise share one primitive.
+-    if( aShape.GetShape() == SHAPE_T::RECTANGLE )
+-        hash_combine( hash, aShape.GetCornerRadius() );
+-
+-    return hash;
++    return hash_fp_item( &aShape, HASH_POS | REL_COORD );
+ }
+ 
+ 
+@@ -1279,32 +1272,37 @@ void PCB_IO_IPC2581::addShape( wxXmlNode* aContentNode, const PCB_SHAPE& aShape,
+         int width = std::abs( aShape.GetRectangleWidth() );
+         int height = std::abs( aShape.GetRectangleHeight() );
+         int stroke_width = aShape.GetStroke().GetWidth();
+-        int corner_radius = aShape.GetCornerRadius();
+-
+-        wxXmlNode* rect_node = appendNode( special_node, "RectRound" );
+-        addLineDesc( rect_node, aShape.GetStroke().GetWidth(), aShape.GetStroke().GetLineStyle(),
+-                     true );
+-
+-        // RectRound rounds only the corners whose flag is set. KiCad rounds all four when the
+-        // rectangle carries a corner radius, so drive the flags off the radius rather than the
+-        // fill mode. A filled rect is grown by the stroke width the same as before.
+-        wxString cornerFlag = corner_radius > 0 ? "true" : "false";
+-        addAttribute( rect_node,  "upperRight", cornerFlag );
+-        addAttribute( rect_node,  "upperLeft", cornerFlag );
+-        addAttribute( rect_node,  "lowerRight", cornerFlag );
+-        addAttribute( rect_node,  "lowerLeft", cornerFlag );
++        int radius = aShape.GetCornerRadius();
+ 
+         if( aShape.GetFillMode() != FILL_T::NO_FILL )
+         {
++            // IPC2581 does not allow strokes on filled elements, so fold the stroke into the
++            // body; the round stroke joins also round the corners by half the stroke width.
+             width += stroke_width;
+             height += stroke_width;
++            radius += stroke_width / 2;
+         }
+ 
++        // A rectangle with square corners must be a RectCenter: RectRound requires at least
++        // one rounded corner (IPC-2581C 3.5.9.14).
++        wxXmlNode* rect_node = appendNode( special_node, radius > 0 ? "RectRound" : "RectCenter" );
++
++        if( aShape.GetFillMode() == FILL_T::NO_FILL )
++            addLineDesc( rect_node, stroke_width, aShape.GetStroke().GetLineStyle(), true );
++
+         addFillDesc( rect_node, aShape.GetFillMode() );
+ 
+         addAttribute( rect_node,  "width", floatVal( m_scale * width ) );
+         addAttribute( rect_node,  "height", floatVal( m_scale * height ) );
+-        addAttribute( rect_node,  "radius", floatVal( m_scale * corner_radius ) );
++
++        if( radius > 0 )
++        {
++            addAttribute( rect_node, "radius", floatVal( m_scale * radius ) );
++            addAttribute( rect_node, "upperRight", "true" );
++            addAttribute( rect_node, "upperLeft", "true" );
++            addAttribute( rect_node, "lowerRight", "true" );
++            addAttribute( rect_node, "lowerLeft", "true" );
++        }
+ 
+         break;
+     }
+-- 
+2.43.0
+

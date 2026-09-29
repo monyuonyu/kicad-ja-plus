@@ -1,0 +1,26 @@
+From 29b364e7382e8d146c6aa54de43f76b04039bccf Mon Sep 17 00:00:00 2001
+From: Petra Bernd <frosted.passers-3k@icloud.com>
+Date: Sat, 18 Apr 2026 20:04:16 -0700
+Subject: [PATCH 08/29] formatting
+
+---
+ pcbnew/pcb_io/odbpp/odb_entity.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/pcbnew/pcb_io/odbpp/odb_entity.cpp b/pcbnew/pcb_io/odbpp/odb_entity.cpp
+index 1b97f4d8..cb7831ec 100644
+--- a/pcbnew/pcb_io/odbpp/odb_entity.cpp
++++ b/pcbnew/pcb_io/odbpp/odb_entity.cpp
+@@ -1165,7 +1165,8 @@ void ODB_LAYER_ENTITY::GenAttrList( ODB_TREE_WRITER& writer )
+             double copperThicknessMM = static_cast<double>( thickness ) / pcbIUScale.mmToIU( 1.0 );
+             double thicknessOz = copperThicknessMM / 0.035;
+             ost << ".copper_weight=" << ODB::Double2String( thicknessOz ) << std::endl;
+-        }else if( thickness > 0 )
++        }
++        else if( thickness>0)
+         {
+             ost << "UNITS=MM" << std::endl;
+             double thicknessOut = PCB_IO_ODBPP::m_scale * thickness;
+-- 
+2.43.0
+

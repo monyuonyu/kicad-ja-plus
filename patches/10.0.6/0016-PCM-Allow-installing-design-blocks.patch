@@ -1,0 +1,32 @@
+From e253e90651cdbc08db5bf18cbdab3463317e7b59 Mon Sep 17 00:00:00 2001
+From: Nicolas Munnich <nickmunnich@gmail.com>
+Date: Fri, 18 Sep 2026 08:45:04 +0100
+Subject: [PATCH 16/29] PCM: Allow installing design blocks
+
+ADDED: Enables the PCM to install design
+block libraries by using the name 'design_blocks'
+
+Fixes https://gitlab.com/kicad/code/kicad/-/work_items/25581
+
+Assisted by: GLM-5.3
+---
+ kicad/pcm/pcm.h | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/kicad/pcm/pcm.h b/kicad/pcm/pcm.h
+index 27fca99b..d0fd8ae3 100644
+--- a/kicad/pcm/pcm.h
++++ b/kicad/pcm/pcm.h
+@@ -46,7 +46,8 @@ const std::unordered_set<wxString> PCM_PACKAGE_DIRECTORIES( {
+         "resources",
+         "colors",
+         "templates",
+-        "scripts"
++        "scripts",
++        "design_blocks"
+ } );
+ 
+ 
+-- 
+2.43.0
+

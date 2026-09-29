@@ -1,0 +1,40 @@
+From b7ea82829bac1234786115d50afb5b5361ceb141 Mon Sep 17 00:00:00 2001
+From: Petra Bernd <frosted.passers-3k@icloud.com>
+Date: Sat, 18 Apr 2026 13:55:27 -0700
+Subject: [PATCH 07/29] fix: odb export lacked units for layer attr files
+
+---
+ pcbnew/pcb_io/odbpp/odb_entity.cpp | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/pcbnew/pcb_io/odbpp/odb_entity.cpp b/pcbnew/pcb_io/odbpp/odb_entity.cpp
+index 48c28ad7..1b97f4d8 100644
+--- a/pcbnew/pcb_io/odbpp/odb_entity.cpp
++++ b/pcbnew/pcb_io/odbpp/odb_entity.cpp
+@@ -1159,17 +1159,17 @@ void ODB_LAYER_ENTITY::GenAttrList( ODB_TREE_WRITER& writer )
+     {
+         int thickness = stackupItem->GetThickness();
+ 
+-        if( thickness > 0 )
+-        {
+-            double thicknessOut = PCB_IO_ODBPP::m_scale * thickness;
+-            ost << ".layer_dielectric=" << ODB::Double2String( thicknessOut ) << std::endl;
+-        }
+-
+         if( stackupItem->GetType() == BS_ITEM_TYPE_COPPER )
+         {
++            ost << "UNITS=INCH" << std::endl;
+             double copperThicknessMM = static_cast<double>( thickness ) / pcbIUScale.mmToIU( 1.0 );
+             double thicknessOz = copperThicknessMM / 0.035;
+             ost << ".copper_weight=" << ODB::Double2String( thicknessOz ) << std::endl;
++        }else if( thickness > 0 )
++        {
++            ost << "UNITS=MM" << std::endl;
++            double thicknessOut = PCB_IO_ODBPP::m_scale * thickness;
++            ost << ".layer_dielectric=" << ODB::Double2String( thicknessOut ) << std::endl;
+         }
+ 
+         if( stackupItem->HasEpsilonRValue() )
+-- 
+2.43.0
+

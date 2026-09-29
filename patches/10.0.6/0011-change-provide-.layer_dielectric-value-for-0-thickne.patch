@@ -1,0 +1,26 @@
+From 0080d9f015e2b7b072190c1a92acc02d41286a48 Mon Sep 17 00:00:00 2001
+From: Petra Bernd <frosted.passers-3k@icloud.com>
+Date: Mon, 20 Apr 2026 20:10:27 -0700
+Subject: [PATCH 11/29] change: provide .layer_dielectric value for 0 thickness
+ layers
+
+---
+ pcbnew/pcb_io/odbpp/odb_entity.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/pcbnew/pcb_io/odbpp/odb_entity.cpp b/pcbnew/pcb_io/odbpp/odb_entity.cpp
+index fea2366c..f9fee503 100644
+--- a/pcbnew/pcb_io/odbpp/odb_entity.cpp
++++ b/pcbnew/pcb_io/odbpp/odb_entity.cpp
+@@ -1172,7 +1172,7 @@ void ODB_LAYER_ENTITY::GenAttrList( ODB_TREE_WRITER& writer )
+             }
+             ost << ".copper_weight=" << ODB::Double2String( thicknessOut ) << std::endl;
+         }
+-        else if( thickness > 0 )
++        else
+         {
+             double thicknessOut = PCB_IO_ODBPP::m_scale * thickness;
+             ost << ".layer_dielectric=" << ODB::Double2String( thicknessOut ) << std::endl;
+-- 
+2.43.0
+

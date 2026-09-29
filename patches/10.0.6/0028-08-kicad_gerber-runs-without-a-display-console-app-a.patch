@@ -1,0 +1,35 @@
+From 4aa1d8d476af004150a6747ae1ac81c1373f1819 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Tue, 29 Sep 2026 09:23:57 +0900
+Subject: [PATCH 28/29] 08: kicad_gerber runs without a display (console app)
+ and sets Pgm() (10.0)
+
+---
+ gerbview/kicad_gerber_main.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/gerbview/kicad_gerber_main.cpp b/gerbview/kicad_gerber_main.cpp
+index c8609809..beeac5d8 100644
+--- a/gerbview/kicad_gerber_main.cpp
++++ b/gerbview/kicad_gerber_main.cpp
+@@ -51,7 +51,8 @@ struct HEADLESS_PGM : public PGM_BASE
+ 
+ static HEADLESS_PGM g_pgm;
+ 
+-struct HEADLESS_APP : public wxApp
++// A console app: runs without a display (a wxApp initializes GTK and needs DISPLAY)
++struct HEADLESS_APP : public wxAppConsole
+ {
+     bool OnInit() override { return true; }
+ };
+@@ -508,6 +509,7 @@ int main( int argc, char** argv )
+     wxInitialize( argc, argv );
+     int kifaceVersion = 0;
+     KIFACE_GETTER( &kifaceVersion, KIFACE_VERSION, &g_pgm );
++    SetPgm( &g_pgm );   // 10.0: Pgm() lives in kicommon and is set here, not by KIFACE_GETTER
+     g_pgm.InitPgm( true, true );
+ 
+     std::string              cmd = argv[1];
+-- 
+2.43.0
+

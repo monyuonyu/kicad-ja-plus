@@ -1,0 +1,43 @@
+From 9df11dc5f27f6d9adacb9857241dc8d04fa66e7a Mon Sep 17 00:00:00 2001
+From: Petra Bernd <frosted.passers-3k@icloud.com>
+Date: Mon, 20 Apr 2026 20:09:23 -0700
+Subject: [PATCH 10/29] fix: match attrlist UNITS= to export unit setting
+
+---
+ pcbnew/pcb_io/odbpp/odb_entity.cpp | 15 ++++++++++-----
+ 1 file changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/pcbnew/pcb_io/odbpp/odb_entity.cpp b/pcbnew/pcb_io/odbpp/odb_entity.cpp
+index add46043..fea2366c 100644
+--- a/pcbnew/pcb_io/odbpp/odb_entity.cpp
++++ b/pcbnew/pcb_io/odbpp/odb_entity.cpp
+@@ -1159,16 +1159,21 @@ void ODB_LAYER_ENTITY::GenAttrList( ODB_TREE_WRITER& writer )
+     {
+         int thickness = stackupItem->GetThickness();
+ 
++        ost << "UNITS=" << PCB_IO_ODBPP::m_unitsStr << std::endl;
++
+         if( stackupItem->GetType() == BS_ITEM_TYPE_COPPER )
+         {
+-            ost << "UNITS=INCH" << std::endl;
+-            double copperThicknessMM = static_cast<double>( thickness ) / pcbIUScale.mmToIU( 1.0 );
+-            double thicknessOz = copperThicknessMM / 0.035;
+-            ost << ".copper_weight=" << ODB::Double2String( thicknessOz ) << std::endl;
++            double thicknessOut = static_cast<double>( thickness ) / pcbIUScale.mmToIU( 1.0 );
++
++            if( PCB_IO_ODBPP::m_unitsStr == "INCH" )
++            {
++                // Convert mm to oz/sqft
++                thicknessOut /= 0.035;
++            }
++            ost << ".copper_weight=" << ODB::Double2String( thicknessOut ) << std::endl;
+         }
+         else if( thickness > 0 )
+         {
+-            ost << "UNITS=MM" << std::endl;
+             double thicknessOut = PCB_IO_ODBPP::m_scale * thickness;
+             ost << ".layer_dielectric=" << ODB::Double2String( thicknessOut ) << std::endl;
+         }
+-- 
+2.43.0
+

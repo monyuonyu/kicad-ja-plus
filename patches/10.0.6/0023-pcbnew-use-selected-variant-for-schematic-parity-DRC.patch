@@ -1,0 +1,2812 @@
+From 06efa57b740a999f4da9aa7b5c56d45e9572ccb6 Mon Sep 17 00:00:00 2001
+From: Victor Stoica <victorstoica114@gmail.com>
+Date: Tue, 29 Sep 2026 08:38:56 +0900
+Subject: [PATCH 23/29] pcbnew: use selected variant for schematic parity DRC
+
+From KiCad MR !2770 (https://gitlab.com/kicad/code/kicad/-/merge_requests/2770), ported to 10.0.6:
+the exclude_from_sim comparison (not in 10.0) and the test for issue 25119 (not in 10.0) are left out.
+---
+ common/dialogs/dialog_rc_job_base.cpp         |  18 +
+ common/dialogs/dialog_rc_job_base.fbp         | 148 ++++
+ common/dialogs/dialog_rc_job_base.h           |   3 +-
+ common/jobs/job_pcb_drc.cpp                   |  14 +-
+ common/jobs/job_pcb_drc.h                     |   4 +-
+ eeschema/dialogs/dialog_erc_job_config.cpp    |   4 +-
+ kicad/cli/command_pcb_drc.cpp                 |   5 +
+ pcbnew/dialogs/dialog_drc_job_config.cpp      |  17 +-
+ pcbnew/dialogs/dialog_drc_job_config.h        |   5 +-
+ .../drc_test_provider_schematic_parity.cpp    |  34 +-
+ pcbnew/netlist_reader/pcb_netlist.cpp         |  56 ++
+ pcbnew/netlist_reader/pcb_netlist.h           |   3 +
+ pcbnew/pcbnew_jobs_handler.cpp                |  15 +-
+ .../issue24900/TestProject.kicad_jobset       |  38 +
+ .../pcbnew/issue24900/TestProject.kicad_pcb   | 616 +++++++++++++
+ .../pcbnew/issue24900/TestProject.kicad_pro   | 824 ++++++++++++++++++
+ .../pcbnew/issue24900/TestProject.kicad_sch   | 524 +++++++++++
+ qa/tests/cli/test_common.py                   |  38 +-
+ qa/tests/pcbnew/test_variant.cpp              |  75 ++
+ 19 files changed, 2409 insertions(+), 32 deletions(-)
+ create mode 100644 qa/data/pcbnew/issue24900/TestProject.kicad_jobset
+ create mode 100644 qa/data/pcbnew/issue24900/TestProject.kicad_pcb
+ create mode 100644 qa/data/pcbnew/issue24900/TestProject.kicad_pro
+ create mode 100644 qa/data/pcbnew/issue24900/TestProject.kicad_sch
+
+diff --git a/common/dialogs/dialog_rc_job_base.cpp b/common/dialogs/dialog_rc_job_base.cpp
+index 38c9def5..c888c8cb 100644
+--- a/common/dialogs/dialog_rc_job_base.cpp
++++ b/common/dialogs/dialog_rc_job_base.cpp
+@@ -87,6 +87,24 @@ DIALOG_RC_JOB_BASE::DIALOG_RC_JOB_BASE( wxWindow* parent, wxWindowID id, const w
+ 	bSizerBottom->Add( m_cbRefillZones, 0, wxBOTTOM|wxLEFT, 5 );
+ 
+ 
++	bSizerBottom->Add( 0, 3, 0, wxEXPAND, 5 );
++
++	wxBoxSizer* bSizerVariant;
++	bSizerVariant = new wxBoxSizer( wxHORIZONTAL );
++
++	m_variantLabel = new wxStaticText( this, wxID_ANY, _("Design variant:"), wxDefaultPosition, wxDefaultSize, 0 );
++	m_variantLabel->Wrap( -1 );
++	bSizerVariant->Add( m_variantLabel, 0, wxALIGN_CENTER_VERTICAL|wxRIGHT, 5 );
++
++	wxArrayString m_variantChoiceChoices;
++	m_variantChoice = new wxChoice( this, wxID_ANY, wxDefaultPosition, wxDefaultSize, m_variantChoiceChoices, 0 );
++	m_variantChoice->SetSelection( 0 );
++	bSizerVariant->Add( m_variantChoice, 1, wxALIGN_CENTER_VERTICAL, 5 );
++
++
++	bSizerBottom->Add( bSizerVariant, 0, wxBOTTOM|wxLEFT|wxEXPAND, 5 );
++
++
+ 	bSizerMain->Add( bSizerBottom, 0, wxEXPAND|wxRIGHT|wxLEFT, 5 );
+ 
+ 	m_sdbSizer1 = new wxStdDialogButtonSizer();
+diff --git a/common/dialogs/dialog_rc_job_base.fbp b/common/dialogs/dialog_rc_job_base.fbp
+index d2e51740..fe2c2819 100644
+--- a/common/dialogs/dialog_rc_job_base.fbp
++++ b/common/dialogs/dialog_rc_job_base.fbp
+@@ -849,6 +849,154 @@
+                 <property name="window_style"></property>
+               </object>
+             </object>
++            <object class="sizeritem" expanded="true">
++              <property name="border">5</property>
++              <property name="flag">wxEXPAND</property>
++              <property name="proportion">0</property>
++              <object class="spacer" expanded="true">
++                <property name="height">3</property>
++                <property name="permission">protected</property>
++                <property name="width">0</property>
++              </object>
++            </object>
++            <object class="sizeritem" expanded="true">
++              <property name="border">5</property>
++              <property name="flag">wxBOTTOM|wxLEFT|wxEXPAND</property>
++              <property name="proportion">0</property>
++              <object class="wxBoxSizer" expanded="true">
++                <property name="minimum_size"></property>
++                <property name="name">bSizerVariant</property>
++                <property name="orient">wxHORIZONTAL</property>
++                <property name="permission">none</property>
++                <object class="sizeritem" expanded="false">
++                  <property name="border">5</property>
++                  <property name="flag">wxALIGN_CENTER_VERTICAL|wxRIGHT</property>
++                  <property name="proportion">0</property>
++                  <object class="wxStaticText" expanded="false">
++                    <property name="BottomDockable">1</property>
++                    <property name="LeftDockable">1</property>
++                    <property name="RightDockable">1</property>
++                    <property name="TopDockable">1</property>
++                    <property name="aui_layer">0</property>
++                    <property name="aui_name"></property>
++                    <property name="aui_position">0</property>
++                    <property name="aui_row">0</property>
++                    <property name="best_size"></property>
++                    <property name="bg"></property>
++                    <property name="caption"></property>
++                    <property name="caption_visible">1</property>
++                    <property name="center_pane">0</property>
++                    <property name="close_button">1</property>
++                    <property name="context_help"></property>
++                    <property name="context_menu">1</property>
++                    <property name="default_pane">0</property>
++                    <property name="dock">Dock</property>
++                    <property name="dock_fixed">0</property>
++                    <property name="docking">Left</property>
++                    <property name="drag_accept_files">0</property>
++                    <property name="enabled">1</property>
++                    <property name="fg"></property>
++                    <property name="floatable">1</property>
++                    <property name="font"></property>
++                    <property name="gripper">0</property>
++                    <property name="hidden">0</property>
++                    <property name="id">wxID_ANY</property>
++                    <property name="label">Design variant:</property>
++                    <property name="markup">0</property>
++                    <property name="max_size"></property>
++                    <property name="maximize_button">0</property>
++                    <property name="maximum_size"></property>
++                    <property name="min_size"></property>
++                    <property name="minimize_button">0</property>
++                    <property name="minimum_size"></property>
++                    <property name="moveable">1</property>
++                    <property name="name">m_variantLabel</property>
++                    <property name="pane_border">1</property>
++                    <property name="pane_position"></property>
++                    <property name="pane_size"></property>
++                    <property name="permission">protected</property>
++                    <property name="pin_button">1</property>
++                    <property name="pos"></property>
++                    <property name="resize">Resizable</property>
++                    <property name="show">1</property>
++                    <property name="size"></property>
++                    <property name="style"></property>
++                    <property name="subclass">; ; forward_declare</property>
++                    <property name="toolbar_pane">0</property>
++                    <property name="tooltip"></property>
++                    <property name="window_extra_style"></property>
++                    <property name="window_name"></property>
++                    <property name="window_style"></property>
++                    <property name="wrap">-1</property>
++                  </object>
++                </object>
++                <object class="sizeritem" expanded="false">
++                  <property name="border">5</property>
++                  <property name="flag">wxALIGN_CENTER_VERTICAL</property>
++                  <property name="proportion">1</property>
++                  <object class="wxChoice" expanded="false">
++                    <property name="BottomDockable">1</property>
++                    <property name="LeftDockable">1</property>
++                    <property name="RightDockable">1</property>
++                    <property name="TopDockable">1</property>
++                    <property name="aui_layer">0</property>
++                    <property name="aui_name"></property>
++                    <property name="aui_position">0</property>
++                    <property name="aui_row">0</property>
++                    <property name="best_size"></property>
++                    <property name="bg"></property>
++                    <property name="caption"></property>
++                    <property name="caption_visible">1</property>
++                    <property name="center_pane">0</property>
++                    <property name="choices"></property>
++                    <property name="close_button">1</property>
++                    <property name="context_help"></property>
++                    <property name="context_menu">1</property>
++                    <property name="default_pane">0</property>
++                    <property name="dock">Dock</property>
++                    <property name="dock_fixed">0</property>
++                    <property name="docking">Left</property>
++                    <property name="drag_accept_files">0</property>
++                    <property name="enabled">1</property>
++                    <property name="fg"></property>
++                    <property name="floatable">1</property>
++                    <property name="font"></property>
++                    <property name="gripper">0</property>
++                    <property name="hidden">0</property>
++                    <property name="id">wxID_ANY</property>
++                    <property name="max_size"></property>
++                    <property name="maximize_button">0</property>
++                    <property name="maximum_size"></property>
++                    <property name="min_size"></property>
++                    <property name="minimize_button">0</property>
++                    <property name="minimum_size"></property>
++                    <property name="moveable">1</property>
++                    <property name="name">m_variantChoice</property>
++                    <property name="pane_border">1</property>
++                    <property name="pane_position"></property>
++                    <property name="pane_size"></property>
++                    <property name="permission">protected</property>
++                    <property name="pin_button">1</property>
++                    <property name="pos"></property>
++                    <property name="resize">Resizable</property>
++                    <property name="selection">0</property>
++                    <property name="show">1</property>
++                    <property name="size"></property>
++                    <property name="style"></property>
++                    <property name="subclass">; ; forward_declare</property>
++                    <property name="toolbar_pane">0</property>
++                    <property name="tooltip"></property>
++                    <property name="validator_data_type"></property>
++                    <property name="validator_style">wxFILTER_NONE</property>
++                    <property name="validator_type">wxDefaultValidator</property>
++                    <property name="validator_variable"></property>
++                    <property name="window_extra_style"></property>
++                    <property name="window_name"></property>
++                    <property name="window_style"></property>
++                  </object>
++                </object>
++              </object>
++            </object>
+           </object>
+         </object>
+         <object class="sizeritem" expanded="false">
+diff --git a/common/dialogs/dialog_rc_job_base.h b/common/dialogs/dialog_rc_job_base.h
+index d9de6d03..23694d3c 100644
+--- a/common/dialogs/dialog_rc_job_base.h
++++ b/common/dialogs/dialog_rc_job_base.h
+@@ -47,6 +47,8 @@ class KICOMMON_API DIALOG_RC_JOB_BASE : public DIALOG_SHIM
+ 		wxCheckBox* m_cbAllTrackViolations;
+ 		wxCheckBox* m_cbSchParity;
+ 		wxCheckBox* m_cbRefillZones;
++		wxStaticText* m_variantLabel;
++		wxChoice* m_variantChoice;
+ 		wxStdDialogButtonSizer* m_sdbSizer1;
+ 		wxButton* m_sdbSizer1OK;
+ 		wxButton* m_sdbSizer1Cancel;
+@@ -62,4 +64,3 @@ class KICOMMON_API DIALOG_RC_JOB_BASE : public DIALOG_SHIM
+ 		~DIALOG_RC_JOB_BASE();
+ 
+ };
+-
+diff --git a/common/jobs/job_pcb_drc.cpp b/common/jobs/job_pcb_drc.cpp
+index ec4db114..32de0c2a 100644
+--- a/common/jobs/job_pcb_drc.cpp
++++ b/common/jobs/job_pcb_drc.cpp
+@@ -23,17 +23,19 @@
+ #include <i18n_utility.h>
+ 
+ JOB_PCB_DRC::JOB_PCB_DRC() :
+-    JOB_RC( "drc" ),
+-    m_reportAllTrackErrors( false ),
+-    m_parity( true ),
+-    m_refillZones( false ),
+-    m_saveBoard( false )
++        JOB_RC( "drc" ),
++        m_reportAllTrackErrors( false ),
++        m_parity( true ),
++        m_refillZones( false ),
++        m_saveBoard( false ),
++        m_variant()
+ {
+     m_params.emplace_back( new JOB_PARAM<bool>( "parity", &m_parity, m_parity ) );
+     m_params.emplace_back(
+             new JOB_PARAM<bool>( "report_all_track_errors", &m_reportAllTrackErrors, m_reportAllTrackErrors ) );
+     m_params.emplace_back( new JOB_PARAM<bool>( "refill_zones", &m_refillZones, m_refillZones ) );
+     m_params.emplace_back( new JOB_PARAM<bool>( "save_board", &m_saveBoard, m_saveBoard ) );
++    m_params.emplace_back( new JOB_PARAM<wxString>( "variant", &m_variant, m_variant ) );
+ }
+ 
+ 
+@@ -49,4 +51,4 @@ wxString JOB_PCB_DRC::GetSettingsDialogTitle() const
+ }
+ 
+ 
+-REGISTER_JOB( pcb_drc, _HKI( "PCB: Perform DRC" ), KIWAY::FACE_PCB, JOB_PCB_DRC );
+\ No newline at end of file
++REGISTER_JOB( pcb_drc, _HKI( "PCB: Perform DRC" ), KIWAY::FACE_PCB, JOB_PCB_DRC );
+diff --git a/common/jobs/job_pcb_drc.h b/common/jobs/job_pcb_drc.h
+index 1c79a80a..9163311a 100644
+--- a/common/jobs/job_pcb_drc.h
++++ b/common/jobs/job_pcb_drc.h
+@@ -34,4 +34,6 @@ public:
+ 
+     bool m_refillZones;
+     bool m_saveBoard;
+-};
+\ No newline at end of file
++
++    wxString m_variant;
++};
+diff --git a/eeschema/dialogs/dialog_erc_job_config.cpp b/eeschema/dialogs/dialog_erc_job_config.cpp
+index 53183613..7a9a9655 100644
+--- a/eeschema/dialogs/dialog_erc_job_config.cpp
++++ b/eeschema/dialogs/dialog_erc_job_config.cpp
+@@ -28,8 +28,10 @@ DIALOG_ERC_JOB_CONFIG::DIALOG_ERC_JOB_CONFIG( wxWindow* parent, JOB_SCH_ERC* aJo
+     m_cbAllTrackViolations->Hide();
+     m_cbSchParity->Hide();
+     m_cbRefillZones->Hide();
++    m_variantLabel->Hide();
++    m_variantChoice->Hide();
+ 
+     Fit();
+     Layout();
+ 	SetMinSize( GetBestSize() );
+-}
+\ No newline at end of file
++}
+diff --git a/kicad/cli/command_pcb_drc.cpp b/kicad/cli/command_pcb_drc.cpp
+index 957785a9..21e8b08a 100644
+--- a/kicad/cli/command_pcb_drc.cpp
++++ b/kicad/cli/command_pcb_drc.cpp
+@@ -98,6 +98,8 @@ CLI::PCB_DRC_COMMAND::PCB_DRC_COMMAND() : COMMAND( "drc" )
+     m_argParser.add_argument( ARG_SAVE_BOARD )
+             .help( UTF8STDSTR( _( "Save the board after DRC, must be used with --refill-zones" ) ) )
+             .flag();
++
++    addVariantsArg();
+ }
+ 
+ 
+@@ -176,6 +178,9 @@ int CLI::PCB_DRC_COMMAND::doPerform( KIWAY& aKiway )
+     drcJob->m_refillZones = m_argParser.get<bool>( ARG_ZONE_FILL );
+     drcJob->m_saveBoard = m_argParser.get<bool>( ARG_SAVE_BOARD );
+ 
++    if( !m_argVariantNames.empty() )
++        drcJob->m_variant = m_argVariantNames.front();
++
+     int exitCode = aKiway.ProcessJob( KIWAY::FACE_PCB, drcJob.get() );
+ 
+     return exitCode;
+diff --git a/pcbnew/dialogs/dialog_drc_job_config.cpp b/pcbnew/dialogs/dialog_drc_job_config.cpp
+index f6865cd1..376897e6 100644
+--- a/pcbnew/dialogs/dialog_drc_job_config.cpp
++++ b/pcbnew/dialogs/dialog_drc_job_config.cpp
+@@ -19,13 +19,15 @@
+  */
+ 
+ #include <dialogs/dialog_drc_job_config.h>
++#include <string_utils.h>
+ 
+-DIALOG_DRC_JOB_CONFIG::DIALOG_DRC_JOB_CONFIG( wxWindow* parent, JOB_PCB_DRC* aJob ) :
++DIALOG_DRC_JOB_CONFIG::DIALOG_DRC_JOB_CONFIG( wxWindow* parent, JOB_PCB_DRC* aJob, const wxArrayString& aVariants ) :
+         DIALOG_RC_JOB( parent, aJob, _( "DRC Job Settings" ) ),
+         m_drcJob( aJob )
+ {
+     SetTitle( aJob->GetSettingsDialogTitle() );
+-	SetMinSize( GetBestSize() );
++    m_variantChoice->Append( aVariants );
++    SetMinSize( GetBestSize() );
+ }
+ 
+ 
+@@ -37,6 +39,9 @@ bool DIALOG_DRC_JOB_CONFIG::TransferDataToWindow()
+     m_cbAllTrackViolations->SetValue( m_drcJob->m_reportAllTrackErrors );
+     m_cbSchParity->SetValue( m_drcJob->m_parity );
+     m_cbRefillZones->SetValue( m_drcJob->m_refillZones );
++
++    int selection = m_variantChoice->FindString( m_drcJob->m_variant, false );
++    m_variantChoice->SetSelection( selection == wxNOT_FOUND ? 0 : selection );
+     return true;
+ }
+ 
+@@ -49,5 +54,11 @@ bool DIALOG_DRC_JOB_CONFIG::TransferDataFromWindow()
+     m_drcJob->m_reportAllTrackErrors = m_cbAllTrackViolations->GetValue();
+     m_drcJob->m_parity = m_cbSchParity->GetValue();
+     m_drcJob->m_refillZones = m_cbRefillZones->GetValue();
++
++    m_drcJob->m_variant = m_variantChoice->GetStringSelection();
++
++    if( m_drcJob->m_variant.CmpNoCase( GetDefaultVariantName() ) == 0 )
++        m_drcJob->m_variant.Clear();
++
+     return true;
+-}
+\ No newline at end of file
++}
+diff --git a/pcbnew/dialogs/dialog_drc_job_config.h b/pcbnew/dialogs/dialog_drc_job_config.h
+index aac14cdd..4c87d473 100644
+--- a/pcbnew/dialogs/dialog_drc_job_config.h
++++ b/pcbnew/dialogs/dialog_drc_job_config.h
+@@ -20,15 +20,16 @@
+ 
+ #include <dialogs/dialog_rc_job.h>
+ #include <jobs/job_pcb_drc.h>
++#include <wx/arrstr.h>
+ 
+ class DIALOG_DRC_JOB_CONFIG : public DIALOG_RC_JOB
+ {
+ public:
+-    DIALOG_DRC_JOB_CONFIG( wxWindow* parent, JOB_PCB_DRC* aJob );
++    DIALOG_DRC_JOB_CONFIG( wxWindow* parent, JOB_PCB_DRC* aJob, const wxArrayString& aVariants );
+ 
+     bool TransferDataToWindow() override;
+     bool TransferDataFromWindow() override;
+ 
+ private:
+     JOB_PCB_DRC* m_drcJob;
+-};
+\ No newline at end of file
++};
+diff --git a/pcbnew/drc/drc_test_provider_schematic_parity.cpp b/pcbnew/drc/drc_test_provider_schematic_parity.cpp
+index eac3cf1f..92ed6b07 100644
+--- a/pcbnew/drc/drc_test_provider_schematic_parity.cpp
++++ b/pcbnew/drc/drc_test_provider_schematic_parity.cpp
+@@ -68,7 +68,8 @@ private:
+ 
+ void DRC_TEST_PROVIDER_SCHEMATIC_PARITY::testNetlist( NETLIST& aNetlist )
+ {
+-    BOARD* board = m_drcEngine->GetBoard();
++    BOARD*          board = m_drcEngine->GetBoard();
++    const wxString& variant = board->GetCurrentVariant();
+ 
+     auto compare = []( const FOOTPRINT* x, const FOOTPRINT* y )
+                    {
+@@ -99,15 +100,18 @@ void DRC_TEST_PROVIDER_SCHEMATIC_PARITY::testNetlist( NETLIST& aNetlist )
+     {
+         COMPONENT* component = aNetlist.GetComponent( ii );
+         FOOTPRINT* footprint = board->FindFootprintByReference( component->GetReference() );
++        nlohmann::ordered_map<wxString, wxString> componentFields = component->GetFields( variant );
++        std::map<wxString, wxString>              componentProperties = component->GetProperties( variant );
++
++        const wxString valueField = GetDefaultFieldName( FIELD_T::VALUE, UNTRANSLATED );
++        const wxString componentValue = component->GetValue( variant );
+ 
+         if( footprint == nullptr )
+         {
+             if( !m_drcEngine->IsErrorLimitExceeded( DRCE_MISSING_FOOTPRINT ) )
+             {
+                 wxString msg;
+-                msg.Printf( _( "Missing footprint %s (%s)" ),
+-                            component->GetReference(),
+-                            component->GetValue() );
++                msg.Printf( _( "Missing footprint %s (%s)" ), component->GetReference(), componentValue );
+ 
+                 std::shared_ptr<DRC_ITEM> drcItem = DRC_ITEM::Create( DRCE_MISSING_FOOTPRINT );
+ 
+@@ -117,13 +121,12 @@ void DRC_TEST_PROVIDER_SCHEMATIC_PARITY::testNetlist( NETLIST& aNetlist )
+         }
+         else
+         {
+-            if( component->GetValue() != footprint->GetValue()
++            if( componentValue != footprint->GetFieldValueForVariant( variant, valueField )
+                 && !m_drcEngine->IsErrorLimitExceeded( DRCE_SCHEMATIC_PARITY ) )
+             {
+                 wxString msg;
+                 msg.Printf( _( "Value (%s) doesn't match symbol value (%s)" ),
+-                            footprint->GetReference(), footprint->GetValue(),
+-                            component->GetValue() );
++                            footprint->GetFieldValueForVariant( variant, valueField ), componentValue );
+ 
+                 std::shared_ptr<DRC_ITEM> drcItem = DRC_ITEM::Create( DRCE_SCHEMATIC_PARITY );
+                 drcItem->SetErrorMessage( msg );
+@@ -176,8 +179,7 @@ void DRC_TEST_PROVIDER_SCHEMATIC_PARITY::testNetlist( NETLIST& aNetlist )
+                 }
+             }
+ 
+-            if( ( component->GetProperties().count( "dnp" ) > 0 )
+-                != ( ( footprint->GetAttributes() & FP_DNP ) > 0 )
++            if( ( componentProperties.count( "dnp" ) > 0 ) != footprint->GetDNPForVariant( variant )
+                 && !m_drcEngine->IsErrorLimitExceeded( DRCE_SCHEMATIC_PARITY ) )
+             {
+                 wxString msg;
+@@ -189,8 +191,8 @@ void DRC_TEST_PROVIDER_SCHEMATIC_PARITY::testNetlist( NETLIST& aNetlist )
+                 reportViolation( drcItem, footprint->GetPosition(), UNDEFINED_LAYER );
+             }
+ 
+-            if( ( component->GetProperties().count( "exclude_from_bom" ) > 0 )
+-                != ( (footprint->GetAttributes() & FP_EXCLUDE_FROM_BOM ) > 0 )
++            if( ( componentProperties.count( "exclude_from_bom" ) > 0 )
++                        != footprint->GetExcludedFromBOMForVariant( variant )
+                 && !m_drcEngine->IsErrorLimitExceeded( DRCE_SCHEMATIC_PARITY ) )
+             {
+                 wxString msg;
+@@ -214,11 +216,17 @@ void DRC_TEST_PROVIDER_SCHEMATIC_PARITY::testNetlist( NETLIST& aNetlist )
+                     if( field->IsReference() || field->IsValue() || field->IsComponentClass() )
+                         continue;
+ 
+-                    fpFieldsAsMap[field->GetName()] = field->GetText();
++                    fpFieldsAsMap[field->GetName()] = footprint->GetFieldValueForVariant( variant, field->GetName() );
++                }
++
++                if( const FOOTPRINT_VARIANT* fpVariant = footprint->GetVariant( variant ) )
++                {
++                    for( const auto& [name, value] : fpVariant->GetFields() )
++                        fpFieldsAsMap[name] = value;
+                 }
+ 
+                 // Remove the extra component fields we don't want to evaluate here
+-                nlohmann::ordered_map<wxString, wxString> compFields = component->GetFields();
++                nlohmann::ordered_map<wxString, wxString> compFields = std::move( componentFields );
+                 compFields.erase( GetCanonicalFieldName( FIELD_T::REFERENCE ) );
+                 compFields.erase( GetCanonicalFieldName( FIELD_T::VALUE ) );
+                 compFields.erase( GetCanonicalFieldName( FIELD_T::FOOTPRINT ) );
+diff --git a/pcbnew/netlist_reader/pcb_netlist.cpp b/pcbnew/netlist_reader/pcb_netlist.cpp
+index 53f8bbc0..c126c3ef 100644
+--- a/pcbnew/netlist_reader/pcb_netlist.cpp
++++ b/pcbnew/netlist_reader/pcb_netlist.cpp
+@@ -31,6 +31,7 @@
+ #include <footprint.h>
+ #include <richio.h>
+ #include <string_utils.h>
++#include <template_fieldnames.h>
+ 
+ 
+ int COMPONENT_NET::Format( OUTPUTFORMATTER* aOut, int aNestLevel, int aCtl )
+@@ -186,6 +187,61 @@ void COMPONENT::AddVariant( const COMPONENT_VARIANT& aVariant )
+ }
+ 
+ 
++wxString COMPONENT::GetValue( const wxString& aVariantName ) const
++{
++    if( const COMPONENT_VARIANT* variant = GetVariant( aVariantName ) )
++    {
++        auto it = variant->m_fields.find( GetDefaultFieldName( FIELD_T::VALUE, UNTRANSLATED ) );
++
++        if( it != variant->m_fields.end() )
++            return it->second;
++    }
++
++    return m_value;
++}
++
++
++nlohmann::ordered_map<wxString, wxString> COMPONENT::GetFields( const wxString& aVariantName ) const
++{
++    nlohmann::ordered_map<wxString, wxString> fields = m_fields;
++
++    if( const COMPONENT_VARIANT* variant = GetVariant( aVariantName ) )
++    {
++        for( const auto& [name, value] : variant->m_fields )
++            fields[name] = value;
++    }
++
++    return fields;
++}
++
++
++std::map<wxString, wxString> COMPONENT::GetProperties( const wxString& aVariantName ) const
++{
++    std::map<wxString, wxString> properties = m_properties;
++
++    if( const COMPONENT_VARIANT* variant = GetVariant( aVariantName ) )
++    {
++        auto resolve = [&]( const wxString& aName, bool aHasValue, bool aValue )
++        {
++            if( !aHasValue )
++                return;
++
++            if( aValue )
++                properties[aName] = wxEmptyString;
++            else
++                properties.erase( aName );
++        };
++
++        resolve( wxT( "dnp" ), variant->m_hasDnp, variant->m_dnp );
++        resolve( wxT( "exclude_from_bom" ), variant->m_hasExcludedFromBOM, variant->m_excludedFromBOM );
++        resolve( wxT( "exclude_from_sim" ), variant->m_hasExcludedFromSim, variant->m_excludedFromSim );
++        resolve( wxT( "exclude_from_pos_files" ), variant->m_hasExcludedFromPosFiles, variant->m_excludedFromPosFiles );
++    }
++
++    return properties;
++}
++
++
+ void COMPONENT::Format( OUTPUTFORMATTER* aOut, int aNestLevel, int aCtl )
+ {
+     int nl = aNestLevel;
+diff --git a/pcbnew/netlist_reader/pcb_netlist.h b/pcbnew/netlist_reader/pcb_netlist.h
+index 087563a5..28be3c38 100644
+--- a/pcbnew/netlist_reader/pcb_netlist.h
++++ b/pcbnew/netlist_reader/pcb_netlist.h
+@@ -158,18 +158,21 @@ public:
+ 
+     void SetValue( const wxString& aValue ) { m_value = aValue; }
+     const wxString& GetValue() const { return m_value; }
++    wxString        GetValue( const wxString& aVariantName ) const;
+ 
+     void SetFields( nlohmann::ordered_map<wxString, wxString> aFields )
+     {
+         m_fields = std::move( aFields );
+     }
+     const nlohmann::ordered_map<wxString, wxString>& GetFields() const { return m_fields; }
++    nlohmann::ordered_map<wxString, wxString>        GetFields( const wxString& aVariantName ) const;
+ 
+     void SetProperties( std::map<wxString, wxString> aProps )
+     {
+         m_properties = std::move( aProps );
+     }
+     const std::map<wxString, wxString>& GetProperties() const { return m_properties; }
++    std::map<wxString, wxString>        GetProperties( const wxString& aVariantName ) const;
+ 
+     void SetFPID( const LIB_ID& aFPID ) { m_fpid = aFPID;  }
+     const LIB_ID& GetFPID() const { return m_fpid; }
+diff --git a/pcbnew/pcbnew_jobs_handler.cpp b/pcbnew/pcbnew_jobs_handler.cpp
+index 4135bc83..3556e122 100644
+--- a/pcbnew/pcbnew_jobs_handler.cpp
++++ b/pcbnew/pcbnew_jobs_handler.cpp
+@@ -339,13 +339,15 @@ PCBNEW_JOBS_HANDLER::PCBNEW_JOBS_HANDLER( KIWAY* aKiway ) :
+                   return true;
+               } );
+     Register( "drc", std::bind( &PCBNEW_JOBS_HANDLER::JobExportDrc, this, std::placeholders::_1 ),
+-              []( JOB* job, wxWindow* aParent ) -> bool
++              [aKiway]( JOB* job, wxWindow* aParent ) -> bool
+               {
+                   JOB_PCB_DRC* drcJob = dynamic_cast<JOB_PCB_DRC*>( job );
++                  PCB_EDIT_FRAME* editFrame =
++                          dynamic_cast<PCB_EDIT_FRAME*>( aKiway->Player( FRAME_PCB_EDITOR, false ) );
+ 
+-                  wxCHECK( drcJob, false );
++                  wxCHECK( drcJob && editFrame && editFrame->GetBoard(), false );
+ 
+-                  DIALOG_DRC_JOB_CONFIG dlg( aParent, drcJob );
++                  DIALOG_DRC_JOB_CONFIG dlg( aParent, drcJob, editFrame->GetBoard()->GetVariantNamesForUI() );
+                   return dlg.ShowModal() == wxID_OK;
+               } );
+     Register( "ipc2581",
+@@ -2300,6 +2302,9 @@ int PCBNEW_JOBS_HANDLER::JobExportDrc( JOB* aJob )
+     if( !brd )
+         return CLI::EXIT_CODES::ERR_INVALID_INPUT_FILE;
+ 
++    if( !drcJob->m_variant.IsEmpty() )
++        brd->SetCurrentVariant( drcJob->m_variant );
++
+     // Running DRC requires libraries be loaded, so make sure they have been
+     FOOTPRINT_LIBRARY_ADAPTER* adapter = PROJECT_PCB::FootprintLibAdapter( brd->GetProject() );
+     adapter->AsyncLoad();
+@@ -2379,6 +2384,10 @@ int PCBNEW_JOBS_HANDLER::JobExportDrc( JOB* aJob )
+             {
+                 typedef bool ( *NETLIST_FN_PTR )( const wxString&, std::string& );
+                 KIFACE* eeschema = m_kiway->KiFACE( KIWAY::FACE_SCH );
++
++            if( drcJob->m_filename.IsEmpty() )
++                schematicPath.Assign( brd->GetProject()->GetProjectFullName() );
++
+                 NETLIST_FN_PTR netlister =
+                         (NETLIST_FN_PTR) eeschema->IfaceOrAddress( KIFACE_NETLIST_SCHEMATIC );
+                 ( *netlister )( schematicPath.GetFullPath(), netlist_str );
+diff --git a/qa/data/pcbnew/issue24900/TestProject.kicad_jobset b/qa/data/pcbnew/issue24900/TestProject.kicad_jobset
+new file mode 100644
+index 00000000..59cd01de
+--- /dev/null
++++ b/qa/data/pcbnew/issue24900/TestProject.kicad_jobset
+@@ -0,0 +1,38 @@
++{
++  "jobs": [
++    {
++      "description": "Variant1 DRC parity",
++      "id": "1642b251-1232-47a1-960e-b9bbdd802245",
++      "settings": {
++        "description": "",
++        "fail_on_error": false,
++        "format": "json",
++        "output_filename": "TestProject-Variant1-drc.json",
++        "parity": true,
++        "refill_zones": false,
++        "report_all_track_errors": false,
++        "save_board": false,
++        "severity": 16,
++        "units": "mm",
++        "variant": "Variant1"
++      },
++      "type": "pcb_drc"
++    }
++  ],
++  "meta": {
++    "version": 1
++  },
++  "outputs": [
++    {
++      "description": "Variant1 DRC report",
++      "id": "f4454cb0-b93f-4f0c-bcdd-e3cd0a2dfc4a",
++      "only": [
++        "1642b251-1232-47a1-960e-b9bbdd802245"
++      ],
++      "settings": {
++        "output_path": "output/"
++      },
++      "type": "folder"
++    }
++  ]
++}
+diff --git a/qa/data/pcbnew/issue24900/TestProject.kicad_pcb b/qa/data/pcbnew/issue24900/TestProject.kicad_pcb
+new file mode 100644
+index 00000000..3a3382ff
+--- /dev/null
++++ b/qa/data/pcbnew/issue24900/TestProject.kicad_pcb
+@@ -0,0 +1,616 @@
++(kicad_pcb
++	(version 20260206)
++	(generator "pcbnew")
++	(generator_version "10.0")
++	(general
++		(thickness 1.6)
++		(legacy_teardrops no)
++	)
++	(paper "A4")
++	(layers
++		(0 "F.Cu" signal)
++		(2 "B.Cu" signal)
++		(9 "F.Adhes" user "F.Adhesive")
++		(11 "B.Adhes" user "B.Adhesive")
++		(13 "F.Paste" user)
++		(15 "B.Paste" user)
++		(5 "F.SilkS" user "F.Silkscreen")
++		(7 "B.SilkS" user "B.Silkscreen")
++		(1 "F.Mask" user)
++		(3 "B.Mask" user)
++		(17 "Dwgs.User" user "User.Drawings")
++		(19 "Cmts.User" user "User.Comments")
++		(21 "Eco1.User" user "User.Eco1")
++		(23 "Eco2.User" user "User.Eco2")
++		(25 "Edge.Cuts" user)
++		(27 "Margin" user)
++		(31 "F.CrtYd" user "F.Courtyard")
++		(29 "B.CrtYd" user "B.Courtyard")
++		(35 "F.Fab" user)
++		(33 "B.Fab" user)
++		(39 "User.1" user)
++		(41 "User.2" user)
++		(43 "User.3" user)
++		(45 "User.4" user)
++	)
++	(setup
++		(pad_to_mask_clearance 0)
++		(allow_soldermask_bridges_in_footprints no)
++		(tenting
++			(front yes)
++			(back yes)
++		)
++		(covering
++			(front no)
++			(back no)
++		)
++		(plugging
++			(front no)
++			(back no)
++		)
++		(capping no)
++		(filling no)
++		(pcbplotparams
++			(layerselection 0x00000000_00000000_55555555_5755f5ff)
++			(plot_on_all_layers_selection 0x00000000_00000000_00000000_00000000)
++			(disableapertmacros no)
++			(usegerberextensions no)
++			(usegerberattributes yes)
++			(usegerberadvancedattributes yes)
++			(creategerberjobfile yes)
++			(dashed_line_dash_ratio 12)
++			(dashed_line_gap_ratio 3)
++			(svgprecision 4)
++			(plotframeref no)
++			(mode 1)
++			(useauxorigin no)
++			(pdf_front_fp_property_popups yes)
++			(pdf_back_fp_property_popups yes)
++			(pdf_metadata yes)
++			(pdf_single_document no)
++			(dxfpolygonmode yes)
++			(dxfimperialunits yes)
++			(dxfusepcbnewfont yes)
++			(psnegative no)
++			(psa4output no)
++			(plot_black_and_white yes)
++			(sketchpadsonfab no)
++			(plotpadnumbers no)
++			(hidednponfab no)
++			(sketchdnponfab yes)
++			(crossoutdnponfab yes)
++			(subtractmaskfromsilk no)
++			(outputformat 1)
++			(mirror no)
++			(drillshape 1)
++			(scaleselection 1)
++			(outputdirectory "")
++		)
++	)
++	(variants
++		(variant
++			(name "Variant1")
++		)
++		(variant
++			(name "Variant2")
++		)
++	)
++	(footprint "Resistor_SMD:R_0603_1608Metric"
++		(layer "F.Cu")
++		(uuid "192cd875-dfe1-4192-87c6-14a4f3c6bbf6")
++		(at 141.505 94 90)
++		(descr "Resistor SMD 0603 (1608 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: IPC-SM-782 page 72, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf)")
++		(tags "resistor")
++		(property "Reference" "R2"
++			(at 0 -1.43 90)
++			(layer "F.SilkS")
++			(uuid "0de26ce3-0a3d-4c2e-a307-c955e01162e9")
++			(effects
++				(font
++					(size 1 1)
++					(thickness 0.15)
++				)
++			)
++		)
++		(property "Value" "R"
++			(at 0 1.43 90)
++			(layer "F.Fab")
++			(uuid "14bd6c68-0d14-4fac-a998-f5fd4c988deb")
++			(effects
++				(font
++					(size 1 1)
++					(thickness 0.15)
++				)
++			)
++		)
++		(property "Datasheet" ""
++			(at 0 0 90)
++			(layer "F.Fab")
++			(hide yes)
++			(uuid "150d1319-bd12-40e9-a615-0f21dccf6d03")
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++			)
++		)
++		(property "Description" "Resistor"
++			(at 0 0 90)
++			(layer "F.Fab")
++			(hide yes)
++			(uuid "9ae86ca6-4d57-4700-b593-f92454a17375")
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++			)
++		)
++		(property "KiLib_Generator" "SMD_2terminal_chip_molded"
++			(at 0 0 90)
++			(layer "F.SilkS")
++			(hide yes)
++			(uuid "47453a9d-5c12-491f-a1c4-ce3f6cdc6e79")
++			(effects
++				(font
++					(size 1 1)
++					(thickness 0.15)
++				)
++			)
++		)
++		(property ki_fp_filters "R_*")
++		(path "/df9a2f78-5968-41ff-8ebc-b17c98d4722d")
++		(sheetname "/")
++		(sheetfile "TestProject.kicad_sch")
++		(units
++			(unit
++				(name "A")
++				(pins "1" "2")
++			)
++		)
++		(attr smd)
++		(duplicate_pad_numbers_are_jumpers no)
++		(fp_line
++			(start -0.237258 -0.5225)
++			(end 0.237258 -0.5225)
++			(stroke
++				(width 0.12)
++				(type solid)
++			)
++			(layer "F.SilkS")
++			(uuid "968305c4-296f-4990-95f2-a00d86837e76")
++		)
++		(fp_line
++			(start -0.237258 0.5225)
++			(end 0.237258 0.5225)
++			(stroke
++				(width 0.12)
++				(type solid)
++			)
++			(layer "F.SilkS")
++			(uuid "5ccf808a-659a-4c96-9cad-f52956d45c32")
++		)
++		(fp_rect
++			(start -1.48 -0.73)
++			(end 1.48 0.73)
++			(stroke
++				(width 0.05)
++				(type solid)
++			)
++			(fill no)
++			(layer "F.CrtYd")
++			(uuid "ed5ff929-748a-46e4-ac66-190e36ca49bf")
++		)
++		(fp_rect
++			(start -0.8 -0.4125)
++			(end 0.8 0.4125)
++			(stroke
++				(width 0.1)
++				(type solid)
++			)
++			(fill no)
++			(layer "F.Fab")
++			(uuid "3c0a5aca-eca3-4b48-aa87-a391e99d3dc8")
++		)
++		(fp_text user "${REFERENCE}"
++			(at 0 0 90)
++			(layer "F.Fab")
++			(uuid "3a1fbd9e-0ca7-4d84-8039-58f882587b42")
++			(effects
++				(font
++					(size 0.4 0.4)
++					(thickness 0.06)
++				)
++			)
++		)
++		(pad "1" smd roundrect
++			(at -0.825 0 90)
++			(size 0.8 0.95)
++			(layers "F.Cu" "F.Mask" "F.Paste")
++			(roundrect_rratio 0.25)
++			(net "Net-(R1-Pad1)")
++			(pintype "passive")
++			(uuid "eba54c8c-683c-4fa6-9fe8-4b9d2680c94d")
++		)
++		(pad "2" smd roundrect
++			(at 0.825 0 90)
++			(size 0.8 0.95)
++			(layers "F.Cu" "F.Mask" "F.Paste")
++			(roundrect_rratio 0.25)
++			(net "Net-(R1-Pad2)")
++			(pintype "passive")
++			(uuid "14256a0e-e0a9-4b06-9d94-a947341ddb81")
++		)
++		(embedded_fonts no)
++		(model "${KICAD10_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_0603_1608Metric.step"
++			(offset
++				(xyz 0 0 0)
++			)
++			(scale
++				(xyz 1 1 1)
++			)
++			(rotate
++				(xyz 0 0 0)
++			)
++		)
++	)
++	(footprint "Resistor_SMD:R_0603_1608Metric"
++		(layer "F.Cu")
++		(uuid "3d237f6e-7ded-4d16-acc8-a90da1dd78a2")
++		(at 145.5 94 90)
++		(descr "Resistor SMD 0603 (1608 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: IPC-SM-782 page 72, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf)")
++		(tags "resistor")
++		(property "Reference" "R3"
++			(at 0 -1.43 90)
++			(layer "F.SilkS")
++			(uuid "6a7364fa-ed87-4e64-9dd8-1c9b9df8267c")
++			(effects
++				(font
++					(size 1 1)
++					(thickness 0.15)
++				)
++			)
++		)
++		(property "Value" "R"
++			(at 0 1.43 90)
++			(layer "F.Fab")
++			(uuid "5b717219-4b92-455a-b0d7-5780885d090d")
++			(effects
++				(font
++					(size 1 1)
++					(thickness 0.15)
++				)
++			)
++		)
++		(property "Datasheet" ""
++			(at 0 0 90)
++			(layer "F.Fab")
++			(hide yes)
++			(uuid "cbd55eee-b946-49d7-8de9-a92d4984d9ff")
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++			)
++		)
++		(property "Description" "Resistor"
++			(at 0 0 90)
++			(layer "F.Fab")
++			(hide yes)
++			(uuid "df892cc7-858d-4529-ac23-9f4698ae1fd4")
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++			)
++		)
++		(property "KiLib_Generator" "SMD_2terminal_chip_molded"
++			(at 0 0 90)
++			(layer "F.SilkS")
++			(hide yes)
++			(uuid "640e73a6-77b2-42e4-a4f8-0293e6f22a45")
++			(effects
++				(font
++					(size 1 1)
++					(thickness 0.15)
++				)
++			)
++		)
++		(property ki_fp_filters "R_*")
++		(path "/23eaf948-5155-4670-92f8-b427b4079a50")
++		(sheetname "/")
++		(sheetfile "TestProject.kicad_sch")
++		(units
++			(unit
++				(name "A")
++				(pins "1" "2")
++			)
++		)
++		(attr smd)
++		(duplicate_pad_numbers_are_jumpers no)
++		(fp_line
++			(start -0.237258 -0.5225)
++			(end 0.237258 -0.5225)
++			(stroke
++				(width 0.12)
++				(type solid)
++			)
++			(layer "F.SilkS")
++			(uuid "e5418b82-d175-4077-9cf2-cde9c3e085fc")
++		)
++		(fp_line
++			(start -0.237258 0.5225)
++			(end 0.237258 0.5225)
++			(stroke
++				(width 0.12)
++				(type solid)
++			)
++			(layer "F.SilkS")
++			(uuid "88b48c17-8657-4b8d-a848-9c43e2fdfd6b")
++		)
++		(fp_rect
++			(start -1.48 -0.73)
++			(end 1.48 0.73)
++			(stroke
++				(width 0.05)
++				(type solid)
++			)
++			(fill no)
++			(layer "F.CrtYd")
++			(uuid "f449690d-2082-4e74-a928-2d0d370bc835")
++		)
++		(fp_rect
++			(start -0.8 -0.4125)
++			(end 0.8 0.4125)
++			(stroke
++				(width 0.1)
++				(type solid)
++			)
++			(fill no)
++			(layer "F.Fab")
++			(uuid "32700a89-c8a3-4e23-b001-f8ecd2ee721c")
++		)
++		(fp_text user "${REFERENCE}"
++			(at 0 0 90)
++			(layer "F.Fab")
++			(uuid "1c8e3f4e-c661-4c78-be68-00a9bd3fd287")
++			(effects
++				(font
++					(size 0.4 0.4)
++					(thickness 0.06)
++				)
++			)
++		)
++		(pad "1" smd roundrect
++			(at -0.825 0 90)
++			(size 0.8 0.95)
++			(layers "F.Cu" "F.Mask" "F.Paste")
++			(roundrect_rratio 0.25)
++			(net "Net-(R1-Pad1)")
++			(pintype "passive")
++			(uuid "d6e31317-6d7b-4569-9c67-d6403bb4b69c")
++		)
++		(pad "2" smd roundrect
++			(at 0.825 0 90)
++			(size 0.8 0.95)
++			(layers "F.Cu" "F.Mask" "F.Paste")
++			(roundrect_rratio 0.25)
++			(net "Net-(R1-Pad2)")
++			(pintype "passive")
++			(uuid "03d2c56a-aef9-4918-85c1-1917d56aed9f")
++		)
++		(embedded_fonts no)
++		(model "${KICAD10_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_0603_1608Metric.step"
++			(offset
++				(xyz 0 0 0)
++			)
++			(scale
++				(xyz 1 1 1)
++			)
++			(rotate
++				(xyz 0 0 0)
++			)
++		)
++	)
++	(footprint "Resistor_SMD:R_0603_1608Metric"
++		(layer "F.Cu")
++		(uuid "e67b4f0f-b5f9-457d-a9b3-2e912d273a56")
++		(at 150 94 90)
++		(descr "Resistor SMD 0603 (1608 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: IPC-SM-782 page 72, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf)")
++		(tags "resistor")
++		(property "Reference" "R1"
++			(at 0 -1.43 90)
++			(layer "F.SilkS")
++			(uuid "d671e854-74ea-44fc-bd8e-967ec8d51395")
++			(effects
++				(font
++					(size 1 1)
++					(thickness 0.15)
++				)
++			)
++		)
++		(property "Value" "R"
++			(at 0 1.43 90)
++			(layer "F.Fab")
++			(uuid "d6a1e55c-36e2-4051-9f34-c46739083e00")
++			(effects
++				(font
++					(size 1 1)
++					(thickness 0.15)
++				)
++			)
++		)
++		(property "Datasheet" ""
++			(at 0 0 90)
++			(layer "F.Fab")
++			(hide yes)
++			(uuid "fed8f96f-ec3a-4331-b1ef-d5e01821ab13")
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++			)
++		)
++		(property "Description" "Resistor"
++			(at 0 0 90)
++			(layer "F.Fab")
++			(hide yes)
++			(uuid "c921c64e-1168-4add-980c-f79c77ba0d41")
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++			)
++		)
++		(property "KiLib_Generator" "SMD_2terminal_chip_molded"
++			(at 0 0 90)
++			(layer "F.SilkS")
++			(hide yes)
++			(uuid "57e5b432-21be-4571-9822-8296d0beb3fe")
++			(effects
++				(font
++					(size 1 1)
++					(thickness 0.15)
++				)
++			)
++		)
++		(property ki_fp_filters "R_*")
++		(path "/32d8c887-69c9-49fd-9641-5b5aa4b72270")
++		(sheetname "/")
++		(sheetfile "TestProject.kicad_sch")
++		(units
++			(unit
++				(name "A")
++				(pins "1" "2")
++			)
++		)
++		(attr smd)
++		(duplicate_pad_numbers_are_jumpers no)
++		(fp_line
++			(start -0.237258 -0.5225)
++			(end 0.237258 -0.5225)
++			(stroke
++				(width 0.12)
++				(type solid)
++			)
++			(layer "F.SilkS")
++			(uuid "5b9bf86a-10fa-4708-8b56-eb1389c950ef")
++		)
++		(fp_line
++			(start -0.237258 0.5225)
++			(end 0.237258 0.5225)
++			(stroke
++				(width 0.12)
++				(type solid)
++			)
++			(layer "F.SilkS")
++			(uuid "b87ec7b3-6e8c-496f-b86f-0e4f9241d95a")
++		)
++		(fp_rect
++			(start -1.48 -0.73)
++			(end 1.48 0.73)
++			(stroke
++				(width 0.05)
++				(type solid)
++			)
++			(fill no)
++			(layer "F.CrtYd")
++			(uuid "f699e49b-b6bb-4608-854a-7d5c6739ebef")
++		)
++		(fp_rect
++			(start -0.8 -0.4125)
++			(end 0.8 0.4125)
++			(stroke
++				(width 0.1)
++				(type solid)
++			)
++			(fill no)
++			(layer "F.Fab")
++			(uuid "9b349f86-0430-4339-a68b-e0c50775e945")
++		)
++		(fp_text user "${REFERENCE}"
++			(at 0 0 90)
++			(layer "F.Fab")
++			(uuid "5dc05304-2db3-4c81-a5db-3bed8b4ccd61")
++			(effects
++				(font
++					(size 0.4 0.4)
++					(thickness 0.06)
++				)
++			)
++		)
++		(pad "1" smd roundrect
++			(at -0.825 0 90)
++			(size 0.8 0.95)
++			(layers "F.Cu" "F.Mask" "F.Paste")
++			(roundrect_rratio 0.25)
++			(net "Net-(R1-Pad1)")
++			(pintype "passive")
++			(uuid "8a34749a-8895-44ed-bbbb-1ddca7b8e1b1")
++		)
++		(pad "2" smd roundrect
++			(at 0.825 0 90)
++			(size 0.8 0.95)
++			(layers "F.Cu" "F.Mask" "F.Paste")
++			(roundrect_rratio 0.25)
++			(net "Net-(R1-Pad2)")
++			(pintype "passive")
++			(uuid "63dfe7df-3fdc-402c-b60b-0e7ca64c13a1")
++		)
++		(embedded_fonts no)
++		(model "${KICAD10_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_0603_1608Metric.step"
++			(offset
++				(xyz 0 0 0)
++			)
++			(scale
++				(xyz 1 1 1)
++			)
++			(rotate
++				(xyz 0 0 0)
++			)
++		)
++	)
++	(gr_rect
++		(start 130 80)
++		(end 170 110)
++		(stroke
++			(width 0.05)
++			(type default)
++		)
++		(fill no)
++		(layer "Edge.Cuts")
++		(uuid "538effd7-30f3-4c5a-a1a4-4b7d5f7feaff")
++	)
++	(segment
++		(start 141.505 94.825)
++		(end 145.5 94.825)
++		(width 0.2)
++		(layer "F.Cu")
++		(net "Net-(R1-Pad1)")
++		(uuid "746d3ca2-5efd-4b1d-9fd3-5e84a0b26b1d")
++	)
++	(segment
++		(start 145.5 94.825)
++		(end 150 94.825)
++		(width 0.2)
++		(layer "F.Cu")
++		(net "Net-(R1-Pad1)")
++		(uuid "a6e5bdda-301f-40eb-8d24-46ff38263357")
++	)
++	(segment
++		(start 150 93.175)
++		(end 145.5 93.175)
++		(width 0.2)
++		(layer "F.Cu")
++		(net "Net-(R1-Pad2)")
++		(uuid "3154f818-53d3-4316-b617-ad85d18f3fe4")
++	)
++	(segment
++		(start 141.505 93.175)
++		(end 145.5 93.175)
++		(width 0.2)
++		(layer "F.Cu")
++		(net "Net-(R1-Pad2)")
++		(uuid "4053e3a3-a8bf-4142-8ebb-456f9c28e212")
++	)
++	(embedded_fonts no)
++)
+diff --git a/qa/data/pcbnew/issue24900/TestProject.kicad_pro b/qa/data/pcbnew/issue24900/TestProject.kicad_pro
+new file mode 100644
+index 00000000..a40d3a57
+--- /dev/null
++++ b/qa/data/pcbnew/issue24900/TestProject.kicad_pro
+@@ -0,0 +1,824 @@
++{
++  "board": {
++    "3dviewports": [],
++    "design_settings": {
++      "bom_export_filename": "${PROJECTNAME}.csv",
++      "bom_fmt_presets": [],
++      "bom_fmt_settings": {
++        "field_delimiter": ",",
++        "include_byte_order_mark": false,
++        "keep_line_breaks": false,
++        "keep_tabs": false,
++        "name": "CSV",
++        "ref_delimiter": ",",
++        "ref_range_delimiter": "",
++        "string_delimiter": "\""
++      },
++      "bom_presets": [],
++      "bom_settings": {
++        "exclude_dnp": false,
++        "fields_ordered": [
++          {
++            "group_by": false,
++            "label": "Reference",
++            "name": "Reference",
++            "show": true
++          },
++          {
++            "group_by": false,
++            "label": "Qty",
++            "name": "${QUANTITY}",
++            "show": true
++          },
++          {
++            "group_by": true,
++            "label": "Value",
++            "name": "Value",
++            "show": true
++          },
++          {
++            "group_by": true,
++            "label": "DNP",
++            "name": "${DNP}",
++            "show": true
++          },
++          {
++            "group_by": true,
++            "label": "Exclude from BOM",
++            "name": "${EXCLUDE_FROM_BOM}",
++            "show": true
++          },
++          {
++            "group_by": true,
++            "label": "Exclude from Board",
++            "name": "${EXCLUDE_FROM_BOARD}",
++            "show": true
++          },
++          {
++            "group_by": true,
++            "label": "Exclude from Simulation",
++            "name": "${EXCLUDE_FROM_SIM}",
++            "show": true
++          },
++          {
++            "group_by": true,
++            "label": "Exclude from Position Files",
++            "name": "${EXCLUDE_FROM_POS_FILES}",
++            "show": true
++          },
++          {
++            "group_by": true,
++            "label": "Footprint",
++            "name": "Footprint",
++            "show": true
++          },
++          {
++            "group_by": false,
++            "label": "Datasheet",
++            "name": "Datasheet",
++            "show": true
++          }
++        ],
++        "filter_scope": "reference",
++        "filter_string": "",
++        "group_symbols": true,
++        "include_excluded_from_bom": true,
++        "name": "Default Editing",
++        "sort_asc": true,
++        "sort_field": "Reference"
++      },
++      "defaults": {
++        "apply_defaults_to_fp_barcodes": false,
++        "apply_defaults_to_fp_dimensions": false,
++        "apply_defaults_to_fp_fields": false,
++        "apply_defaults_to_fp_shapes": false,
++        "apply_defaults_to_fp_text": false,
++        "board_outline_line_width": 0.05,
++        "copper_line_width": 0.2,
++        "copper_text_italic": false,
++        "copper_text_size_h": 1.5,
++        "copper_text_size_v": 1.5,
++        "copper_text_thickness": 0.3,
++        "copper_text_upright": false,
++        "courtyard_line_width": 0.05,
++        "dimension_precision": 4,
++        "dimension_units": 3,
++        "dimensions": {
++          "arrow_length": 1270000,
++          "extension_offset": 500000,
++          "keep_text_aligned": true,
++          "suppress_zeroes": true,
++          "text_position": 0,
++          "units_format": 0
++        },
++        "fab_line_width": 0.1,
++        "fab_text_italic": false,
++        "fab_text_size_h": 1.0,
++        "fab_text_size_v": 1.0,
++        "fab_text_thickness": 0.15,
++        "fab_text_upright": false,
++        "other_line_width": 0.1,
++        "other_text_italic": false,
++        "other_text_size_h": 1.0,
++        "other_text_size_v": 1.0,
++        "other_text_thickness": 0.15,
++        "other_text_upright": false,
++        "pads": {
++          "drill": 0.8,
++          "height": 1.27,
++          "width": 1.27
++        },
++        "silk_line_width": 0.1,
++        "silk_text_italic": false,
++        "silk_text_size_h": 1.0,
++        "silk_text_size_v": 1.0,
++        "silk_text_thickness": 0.1,
++        "silk_text_upright": false,
++        "zones": {
++          "border_display_style": 2,
++          "border_hatch_pitch": 0.5,
++          "corner_radius": 0.0,
++          "corner_smoothing": 0,
++          "fill_mode": 0,
++          "hatch_gap": 1.5,
++          "hatch_orientation": 0.0,
++          "hatch_smoothing_level": 0,
++          "hatch_smoothing_value": 0.1,
++          "hatch_thickness": 1.0,
++          "min_clearance": 0.5,
++          "min_island_area": 10.0,
++          "min_thickness": 0.25,
++          "pad_connection": 1,
++          "remove_islands": 0,
++          "thermal_relief_gap": 0.5,
++          "thermal_relief_spoke_width": 0.5
++        }
++      },
++      "diff_pair_dimensions": [],
++      "drc_exclusions": [],
++      "meta": {
++        "version": 3
++      },
++      "rule_severities": {
++        "annular_width": "error",
++        "assertion_failure": "error",
++        "clearance": "error",
++        "connection_width": "warning",
++        "copper_edge_clearance": "error",
++        "copper_sliver": "warning",
++        "courtyards_overlap": "error",
++        "creepage": "error",
++        "diff_pair_gap_out_of_range": "error",
++        "diff_pair_uncoupled_length_too_long": "error",
++        "drill_out_of_range": "error",
++        "duplicate_footprints": "warning",
++        "extra_footprint": "warning",
++        "footprint": "error",
++        "footprint_filters_mismatch": "ignore",
++        "footprint_scaled_with_pads": "warning",
++        "footprint_symbol_field_mismatch": "warning",
++        "footprint_symbol_mismatch": "warning",
++        "footprint_type_mismatch": "ignore",
++        "hole_clearance": "error",
++        "hole_to_hole": "warning",
++        "holes_co_located": "warning",
++        "invalid_outline": "error",
++        "isolated_copper": "warning",
++        "item_on_disabled_layer": "error",
++        "items_not_allowed": "error",
++        "length_out_of_range": "error",
++        "lib_footprint_issues": "warning",
++        "lib_footprint_mismatch": "warning",
++        "malformed_courtyard": "error",
++        "microvia_drill_out_of_range": "error",
++        "mirrored_text_on_front_layer": "warning",
++        "missing_courtyard": "ignore",
++        "missing_footprint": "warning",
++        "missing_tuning_profile": "warning",
++        "net_chain_return_path": "error",
++        "net_chain_stub_length": "error",
++        "net_chain_tuning_profiles": "error",
++        "net_conflict": "warning",
++        "nonmirrored_text_on_back_layer": "warning",
++        "npth_inside_courtyard": "error",
++        "padstack": "warning",
++        "pth_inside_courtyard": "error",
++        "shorting_items": "error",
++        "silk_edge_clearance": "warning",
++        "silk_over_copper": "warning",
++        "silk_overlap": "warning",
++        "skew_out_of_range": "error",
++        "solder_mask_bridge": "error",
++        "starved_thermal": "error",
++        "text_height": "warning",
++        "text_on_edge_cuts": "error",
++        "text_thickness": "warning",
++        "through_hole_pad_without_hole": "error",
++        "too_many_vias": "error",
++        "track_angle": "error",
++        "track_dangling": "warning",
++        "track_not_centered_on_via": "ignore",
++        "track_on_post_machined_layer": "error",
++        "track_segment_length": "error",
++        "track_width": "error",
++        "tracks_crossing": "error",
++        "tuning_profile_track_geometries": "ignore",
++        "unconnected_items": "error",
++        "unresolved_variable": "error",
++        "via_dangling": "warning",
++        "via_diameter": "error",
++        "via_stitch_overlap": "error",
++        "zones_intersect": "error"
++      },
++      "rules": {
++        "max_error": 0.005,
++        "min_clearance": 0.0,
++        "min_connection": 0.0,
++        "min_copper_edge_clearance": 0.5,
++        "min_groove_width": 0.0,
++        "min_hole_clearance": 0.25,
++        "min_hole_to_hole": 0.25,
++        "min_microvia_diameter": 0.2,
++        "min_microvia_drill": 0.1,
++        "min_resolved_spokes": 2,
++        "min_silk_clearance": 0.0,
++        "min_text_height": 0.8,
++        "min_text_thickness": 0.08,
++        "min_through_hole_diameter": 0.3,
++        "min_track_width": 0.2,
++        "min_via_annular_width": 0.1,
++        "min_via_diameter": 0.5,
++        "solder_mask_to_copper_clearance": 0.0,
++        "use_height_for_length_calcs": true
++      },
++      "teardrop_options": [
++        {
++          "td_onpthpad": true,
++          "td_onroundshapesonly": false,
++          "td_onsmdpad": true,
++          "td_ontrackend": false,
++          "td_onvia": true
++        }
++      ],
++      "teardrop_parameters": [
++        {
++          "td_allow_use_two_tracks": true,
++          "td_curve_segcount": 0,
++          "td_height_ratio": 1.0,
++          "td_length_ratio": 0.5,
++          "td_maxheight": 2.0,
++          "td_maxlen": 1.0,
++          "td_on_pad_in_zone": false,
++          "td_target_name": "td_round_shape",
++          "td_width_to_size_filter_ratio": 0.9
++        },
++        {
++          "td_allow_use_two_tracks": true,
++          "td_curve_segcount": 0,
++          "td_height_ratio": 1.0,
++          "td_length_ratio": 0.5,
++          "td_maxheight": 2.0,
++          "td_maxlen": 1.0,
++          "td_on_pad_in_zone": false,
++          "td_target_name": "td_rect_shape",
++          "td_width_to_size_filter_ratio": 0.9
++        },
++        {
++          "td_allow_use_two_tracks": true,
++          "td_curve_segcount": 0,
++          "td_height_ratio": 1.0,
++          "td_length_ratio": 0.5,
++          "td_maxheight": 2.0,
++          "td_maxlen": 1.0,
++          "td_on_pad_in_zone": false,
++          "td_target_name": "td_track_end",
++          "td_width_to_size_filter_ratio": 0.9
++        }
++      ],
++      "track_widths": [],
++      "tuning_pattern_settings": {
++        "diff_pair_defaults": {
++          "corner_radius_percentage": 80,
++          "corner_style": 1,
++          "max_amplitude": 1.0,
++          "min_amplitude": 0.2,
++          "single_sided": false,
++          "spacing": 1.0
++        },
++        "diff_pair_skew_defaults": {
++          "corner_radius_percentage": 80,
++          "corner_style": 1,
++          "max_amplitude": 1.0,
++          "min_amplitude": 0.2,
++          "single_sided": false,
++          "spacing": 0.6
++        },
++        "single_track_defaults": {
++          "corner_radius_percentage": 80,
++          "corner_style": 1,
++          "max_amplitude": 1.0,
++          "min_amplitude": 0.2,
++          "single_sided": false,
++          "spacing": 0.6
++        }
++      },
++      "via_dimensions": [],
++      "zones_allow_external_fillets": false
++    },
++    "ipc2581": {
++      "bom_rev": "",
++      "dist": "",
++      "distpn": "",
++      "internal_id": "",
++      "mfg": "",
++      "mode": "",
++      "mpn": "",
++      "net_names": "",
++      "ref_des": "",
++      "sch_revision": "",
++      "sections": ""
++    },
++    "layer_pairs": [],
++    "layer_presets": [],
++    "viewports": []
++  },
++  "boards": [],
++  "component_class_settings": {
++    "assignments": [],
++    "meta": {
++      "version": 0
++    },
++    "sheet_component_classes": {
++      "enabled": false
++    }
++  },
++  "cvpcb": {
++    "equivalence_files": []
++  },
++  "erc": {
++    "erc_exclusions": [],
++    "meta": {
++      "version": 1
++    },
++    "pin_map": [
++      [
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        1,
++        0,
++        0,
++        0,
++        0,
++        2
++      ],
++      [
++        0,
++        2,
++        0,
++        1,
++        0,
++        0,
++        1,
++        0,
++        2,
++        2,
++        2,
++        2
++      ],
++      [
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        1,
++        0,
++        1,
++        0,
++        1,
++        2
++      ],
++      [
++        0,
++        1,
++        0,
++        0,
++        0,
++        0,
++        1,
++        1,
++        2,
++        1,
++        1,
++        2
++      ],
++      [
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        1,
++        0,
++        0,
++        0,
++        0,
++        2
++      ],
++      [
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        2
++      ],
++      [
++        1,
++        1,
++        1,
++        1,
++        1,
++        0,
++        1,
++        1,
++        1,
++        1,
++        1,
++        2
++      ],
++      [
++        0,
++        0,
++        0,
++        1,
++        0,
++        0,
++        1,
++        0,
++        0,
++        0,
++        0,
++        2
++      ],
++      [
++        0,
++        2,
++        1,
++        2,
++        0,
++        0,
++        1,
++        0,
++        2,
++        2,
++        2,
++        2
++      ],
++      [
++        0,
++        2,
++        0,
++        1,
++        0,
++        0,
++        1,
++        0,
++        2,
++        0,
++        0,
++        2
++      ],
++      [
++        0,
++        2,
++        1,
++        1,
++        0,
++        0,
++        1,
++        0,
++        2,
++        0,
++        0,
++        2
++      ],
++      [
++        2,
++        2,
++        2,
++        2,
++        2,
++        2,
++        2,
++        2,
++        2,
++        2,
++        2,
++        2
++      ]
++    ],
++    "rule_severities": {
++      "bus_definition_conflict": "error",
++      "bus_entry_needed": "error",
++      "bus_to_bus_conflict": "error",
++      "bus_to_net_conflict": "error",
++      "different_unit_footprint": "error",
++      "different_unit_net": "error",
++      "duplicate_reference": "error",
++      "duplicate_sheet_names": "error",
++      "empty_label_name": "error",
++      "endpoint_off_grid": "warning",
++      "extra_units": "error",
++      "field_name_whitespace": "warning",
++      "footprint_filter": "ignore",
++      "footprint_link_issues": "warning",
++      "four_way_junction": "ignore",
++      "ground_pin_not_ground": "warning",
++      "hier_label_mismatch": "error",
++      "isolated_pin_label": "warning",
++      "label_dangling": "error",
++      "label_multiple_wires": "warning",
++      "lib_symbol_issues": "warning",
++      "lib_symbol_mismatch": "warning",
++      "missing_bidi_pin": "warning",
++      "missing_input_pin": "warning",
++      "missing_power_pin": "error",
++      "missing_unit": "warning",
++      "multiple_net_names": "warning",
++      "net_not_bus_member": "warning",
++      "no_connect_connected": "warning",
++      "no_connect_dangling": "warning",
++      "pin_map_bad_pad": "error",
++      "pin_map_duplicate_pad": "error",
++      "pin_map_stale_pin": "warning",
++      "pin_map_unmapped_pin": "warning",
++      "pin_not_connected": "error",
++      "pin_not_driven": "error",
++      "pin_to_pin": "warning",
++      "power_pin_not_driven": "error",
++      "same_local_global_label": "warning",
++      "same_local_global_power": "warning",
++      "similar_label_and_power": "warning",
++      "similar_labels": "warning",
++      "similar_power": "warning",
++      "simulation_model_issue": "ignore",
++      "single_global_label": "ignore",
++      "stacked_pin_name": "warning",
++      "unannotated": "error",
++      "unconnected_wire_endpoint": "warning",
++      "undefined_netclass": "error",
++      "unit_value_mismatch": "error",
++      "unresolved_variable": "error",
++      "variant_symbol_incompatible": "warning",
++      "variant_symbol_invalid": "error",
++      "wire_dangling": "error"
++    }
++  },
++  "libraries": {
++    "pinned_footprint_libs": [],
++    "pinned_symbol_libs": []
++  },
++  "meta": {
++    "filename": "TestProject.kicad_pro",
++    "version": 3
++  },
++  "net_settings": {
++    "classes": [
++      {
++        "bus_width": 12,
++        "clearance": 0.2,
++        "diff_pair_gap": 0.25,
++        "diff_pair_via_gap": 0.25,
++        "diff_pair_width": 0.2,
++        "line_style": 0,
++        "microvia_diameter": 0.3,
++        "microvia_drill": 0.1,
++        "name": "Default",
++        "pcb_color": "rgba(0, 0, 0, 0.000)",
++        "priority": 2147483647,
++        "schematic_color": "rgba(0, 0, 0, 0.000)",
++        "track_width": 0.2,
++        "tuning_profile": "",
++        "via_diameter": 0.6,
++        "via_drill": 0.3,
++        "wire_width": 6
++      }
++    ],
++    "meta": {
++      "version": 5
++    },
++    "net_chain_classes": {},
++    "net_chain_netclasses": {},
++    "net_colors": null,
++    "netclass_assignments": null,
++    "netclass_patterns": []
++  },
++  "pcbnew": {
++    "find_by_properties": {
++      "recent_queries": []
++    },
++    "last_paths": {
++      "idf": "",
++      "netlist": "",
++      "plot": "",
++      "specctra_dsn": "",
++      "step": "",
++      "vrml": ""
++    },
++    "page_layout_descr_file": ""
++  },
++  "schematic": {
++    "annotate_start_num": 0,
++    "annotation": {
++      "method": 0,
++      "sort_order": 0
++    },
++    "bom_export_filename": "",
++    "bom_fmt_presets": [],
++    "bom_fmt_settings": {
++      "field_delimiter": ",",
++      "include_byte_order_mark": false,
++      "keep_line_breaks": false,
++      "keep_tabs": false,
++      "name": "CSV",
++      "ref_delimiter": ",",
++      "ref_range_delimiter": "",
++      "string_delimiter": "\""
++    },
++    "bom_presets": [],
++    "bom_settings": {
++      "exclude_dnp": false,
++      "fields_ordered": [
++        {
++          "group_by": false,
++          "label": "Reference",
++          "name": "Reference",
++          "show": true
++        },
++        {
++          "group_by": false,
++          "label": "Qty",
++          "name": "${QUANTITY}",
++          "show": true
++        },
++        {
++          "group_by": true,
++          "label": "Value",
++          "name": "Value",
++          "show": true
++        },
++        {
++          "group_by": true,
++          "label": "DNP",
++          "name": "${DNP}",
++          "show": true
++        },
++        {
++          "group_by": true,
++          "label": "Exclude from BOM",
++          "name": "${EXCLUDE_FROM_BOM}",
++          "show": true
++        },
++        {
++          "group_by": true,
++          "label": "Exclude from Board",
++          "name": "${EXCLUDE_FROM_BOARD}",
++          "show": true
++        },
++        {
++          "group_by": true,
++          "label": "Exclude from Simulation",
++          "name": "${EXCLUDE_FROM_SIM}",
++          "show": true
++        },
++        {
++          "group_by": true,
++          "label": "Exclude from Position Files",
++          "name": "${EXCLUDE_FROM_POS_FILES}",
++          "show": true
++        },
++        {
++          "group_by": true,
++          "label": "Footprint",
++          "name": "Footprint",
++          "show": true
++        },
++        {
++          "group_by": false,
++          "label": "Datasheet",
++          "name": "Datasheet",
++          "show": true
++        },
++        {
++          "group_by": false,
++          "label": "#",
++          "name": "${ITEM_NUMBER}",
++          "show": false
++        },
++        {
++          "group_by": false,
++          "label": "Description",
++          "name": "Description",
++          "show": false
++        }
++      ],
++      "filter_scope": "reference",
++      "filter_string": "",
++      "group_symbols": true,
++      "include_excluded_from_bom": true,
++      "name": "",
++      "sort_asc": true,
++      "sort_field": "Reference"
++    },
++    "bus_aliases": {},
++    "compare_symbols": {
++      "dnp_flags": false,
++      "exclude_from_board_flags": true,
++      "exclude_from_bom_flags": false,
++      "exclude_from_position_file_flags": true,
++      "extra_fields": false,
++      "field_positions": false,
++      "field_styles": false,
++      "field_texts": true,
++      "field_visibilities": false,
++      "missing_fields": true,
++      "pin_alt_function_definitions": true,
++      "pin_name_number_visibilities": false
++    },
++    "connection_grid_size": 50.0,
++    "drawing": {
++      "dashed_lines_dash_length_ratio": 12.0,
++      "dashed_lines_gap_length_ratio": 3.0,
++      "default_line_thickness": 6.0,
++      "default_text_size": 50.0,
++      "field_names": [],
++      "hop_over_size_choice": 0,
++      "intersheets_ref_own_page": false,
++      "intersheets_ref_prefix": "",
++      "intersheets_ref_short": false,
++      "intersheets_ref_show": false,
++      "intersheets_ref_suffix": "",
++      "junction_size_choice": 3,
++      "label_size_ratio": 0.375,
++      "operating_point_overlay_i_precision": 3,
++      "operating_point_overlay_i_range": "~A",
++      "operating_point_overlay_v_precision": 3,
++      "operating_point_overlay_v_range": "~V",
++      "overbar_offset_ratio": 1.23,
++      "pin_symbol_size": 25.0,
++      "text_offset_ratio": 0.15
++    },
++    "legacy_lib_dir": "",
++    "legacy_lib_list": [],
++    "meta": {
++      "version": 1
++    },
++    "page_layout_descr_file": "",
++    "plot_directory": "",
++    "reuse_designators": true,
++    "subpart_first_id": 65,
++    "subpart_id_separator": 0,
++    "top_level_sheets": [
++      {
++        "filename": "TestProject.kicad_sch",
++        "name": "Root",
++        "uuid": "0491dce0-5dc3-4fd4-8a65-248d0756821f"
++      }
++    ],
++    "used_designators": "R1-3",
++    "variants": [
++      {
++        "name": "Variant1"
++      },
++      {
++        "name": "Variant2"
++      }
++    ]
++  },
++  "sheets": [
++    [
++      "0491dce0-5dc3-4fd4-8a65-248d0756821f",
++      "Root"
++    ]
++  ],
++  "text_variables": {},
++  "tuning_profiles": {
++    "meta": {
++      "version": 2
++    },
++    "tuning_profiles_impedance_geometric": []
++  }
++}
+diff --git a/qa/data/pcbnew/issue24900/TestProject.kicad_sch b/qa/data/pcbnew/issue24900/TestProject.kicad_sch
+new file mode 100644
+index 00000000..7f58c33a
+--- /dev/null
++++ b/qa/data/pcbnew/issue24900/TestProject.kicad_sch
+@@ -0,0 +1,524 @@
++(kicad_sch
++	(version 20260306)
++	(generator "eeschema")
++	(generator_version "10.0")
++	(uuid "0491dce0-5dc3-4fd4-8a65-248d0756821f")
++	(paper "A4")
++	(lib_symbols
++		(symbol "Device:R"
++			(pin_numbers
++				(hide yes)
++			)
++			(pin_names
++				(offset 0)
++			)
++			(exclude_from_sim no)
++			(in_bom yes)
++			(on_board yes)
++			(in_pos_files yes)
++			(duplicate_pin_numbers_are_jumpers no)
++			(property "Reference" "R"
++				(at 2.032 0 90)
++				(show_name no)
++				(do_not_autoplace no)
++				(effects
++					(font
++						(size 1.27 1.27)
++					)
++				)
++			)
++			(property "Value" "R"
++				(at 0 0 90)
++				(show_name no)
++				(do_not_autoplace no)
++				(effects
++					(font
++						(size 1.27 1.27)
++					)
++				)
++			)
++			(property "Footprint" ""
++				(at -1.778 0 90)
++				(show_name no)
++				(do_not_autoplace no)
++				(hide yes)
++				(effects
++					(font
++						(size 1.27 1.27)
++					)
++				)
++			)
++			(property "Datasheet" ""
++				(at 0 0 0)
++				(show_name no)
++				(do_not_autoplace no)
++				(hide yes)
++				(effects
++					(font
++						(size 1.27 1.27)
++					)
++				)
++			)
++			(property "Description" "Resistor"
++				(at 0 0 0)
++				(show_name no)
++				(do_not_autoplace no)
++				(hide yes)
++				(effects
++					(font
++						(size 1.27 1.27)
++					)
++				)
++			)
++			(property "ki_keywords" "R res resistor"
++				(at 0 0 0)
++				(show_name no)
++				(do_not_autoplace no)
++				(hide yes)
++				(effects
++					(font
++						(size 1.27 1.27)
++					)
++				)
++			)
++			(property "ki_fp_filters" "R_*"
++				(at 0 0 0)
++				(show_name no)
++				(do_not_autoplace no)
++				(hide yes)
++				(effects
++					(font
++						(size 1.27 1.27)
++					)
++				)
++			)
++			(symbol "R_0_1"
++				(rectangle
++					(start -1.016 -2.54)
++					(end 1.016 2.54)
++					(stroke
++						(width 0.254)
++						(type default)
++					)
++					(fill
++						(type none)
++					)
++				)
++			)
++			(symbol "R_1_1"
++				(pin passive line
++					(at 0 3.81 270)
++					(length 1.27)
++					(name ""
++						(effects
++							(font
++								(size 1.27 1.27)
++							)
++						)
++					)
++					(number "1"
++						(effects
++							(font
++								(size 1.27 1.27)
++							)
++						)
++					)
++				)
++				(pin passive line
++					(at 0 -3.81 90)
++					(length 1.27)
++					(name ""
++						(effects
++							(font
++								(size 1.27 1.27)
++							)
++						)
++					)
++					(number "2"
++						(effects
++							(font
++								(size 1.27 1.27)
++							)
++						)
++					)
++				)
++			)
++			(embedded_fonts no)
++		)
++	)
++	(junction
++		(at 111.76 73.66)
++		(diameter 0)
++		(color 0 0 0 0)
++		(uuid "1a1ca2dd-2877-43a4-8994-5b5fd5b6fbd4")
++	)
++	(junction
++		(at 111.76 86.36)
++		(diameter 0)
++		(color 0 0 0 0)
++		(uuid "6333a030-fa15-4766-9dec-cf9b34946b2b")
++	)
++	(wire
++		(pts
++			(xy 111.76 76.2) (xy 111.76 73.66)
++		)
++		(stroke
++			(width 0)
++			(type default)
++		)
++		(uuid "016d801f-1279-45b4-9a55-335b3ed8f9a0")
++	)
++	(wire
++		(pts
++			(xy 101.6 83.82) (xy 101.6 86.36)
++		)
++		(stroke
++			(width 0)
++			(type default)
++		)
++		(uuid "15229b97-b3ee-4750-ada7-a14c544348f8")
++	)
++	(wire
++		(pts
++			(xy 111.76 83.82) (xy 111.76 86.36)
++		)
++		(stroke
++			(width 0)
++			(type default)
++		)
++		(uuid "3472ab93-a901-4d31-bb43-e2732aa87ea5")
++	)
++	(wire
++		(pts
++			(xy 121.92 83.82) (xy 121.92 86.36)
++		)
++		(stroke
++			(width 0)
++			(type default)
++		)
++		(uuid "3e135208-b788-4448-8591-e61b99db33cc")
++	)
++	(wire
++		(pts
++			(xy 101.6 86.36) (xy 111.76 86.36)
++		)
++		(stroke
++			(width 0)
++			(type default)
++		)
++		(uuid "61fcfc91-f586-4fce-bd36-c8d3c8fc5d35")
++	)
++	(wire
++		(pts
++			(xy 111.76 86.36) (xy 121.92 86.36)
++		)
++		(stroke
++			(width 0)
++			(type default)
++		)
++		(uuid "62f948ad-e5bc-4538-9441-1330ef474703")
++	)
++	(wire
++		(pts
++			(xy 121.92 73.66) (xy 121.92 76.2)
++		)
++		(stroke
++			(width 0)
++			(type default)
++		)
++		(uuid "65af6209-504c-4759-bb52-55ce877c41bc")
++	)
++	(wire
++		(pts
++			(xy 101.6 73.66) (xy 101.6 76.2)
++		)
++		(stroke
++			(width 0)
++			(type default)
++		)
++		(uuid "721c8cba-70ff-4ca2-8e71-626681b2e346")
++	)
++	(wire
++		(pts
++			(xy 111.76 73.66) (xy 121.92 73.66)
++		)
++		(stroke
++			(width 0)
++			(type default)
++		)
++		(uuid "ac6aaf3d-baf3-4e9e-8f81-fe819c24510e")
++	)
++	(wire
++		(pts
++			(xy 111.76 73.66) (xy 101.6 73.66)
++		)
++		(stroke
++			(width 0)
++			(type default)
++		)
++		(uuid "bbcb73e1-df22-4d68-adff-e51bd571b3d4")
++	)
++	(symbol
++		(lib_id "Device:R")
++		(at 121.92 80.01 0)
++		(unit 1)
++		(body_style 1)
++		(exclude_from_sim no)
++		(in_bom yes)
++		(on_board yes)
++		(in_pos_files yes)
++		(dnp no)
++		(fields_autoplaced yes)
++		(uuid "23eaf948-5155-4670-92f8-b427b4079a50")
++		(property "Reference" "R3"
++			(at 124.46 78.7399 0)
++			(show_name no)
++			(do_not_autoplace no)
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++				(justify left)
++			)
++		)
++		(property "Value" "R"
++			(at 124.46 81.2799 0)
++			(show_name no)
++			(do_not_autoplace no)
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++				(justify left)
++			)
++		)
++		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
++			(at 120.142 80.01 90)
++			(hide yes)
++			(show_name no)
++			(do_not_autoplace no)
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++			)
++		)
++		(property "Datasheet" ""
++			(at 121.92 80.01 0)
++			(hide yes)
++			(show_name no)
++			(do_not_autoplace no)
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++			)
++		)
++		(property "Description" "Resistor"
++			(at 121.92 80.01 0)
++			(hide yes)
++			(show_name no)
++			(do_not_autoplace no)
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++			)
++		)
++		(pin "2"
++			(uuid "6f4f16a7-beb4-4c1c-b2d1-c38ad0fdb7ba")
++		)
++		(pin "1"
++			(uuid "d43e5c74-530d-44c4-8bd9-6c593e966c26")
++		)
++		(instances
++			(project "TestProject"
++				(path "/0491dce0-5dc3-4fd4-8a65-248d0756821f"
++					(reference "R3")
++					(unit 1)
++				)
++			)
++		)
++	)
++	(symbol
++		(lib_id "Device:R")
++		(at 101.6 80.01 0)
++		(unit 1)
++		(body_style 1)
++		(exclude_from_sim no)
++		(in_bom yes)
++		(on_board yes)
++		(in_pos_files yes)
++		(dnp no)
++		(fields_autoplaced yes)
++		(uuid "32d8c887-69c9-49fd-9641-5b5aa4b72270")
++		(property "Reference" "R1"
++			(at 104.14 78.7399 0)
++			(show_name no)
++			(do_not_autoplace no)
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++				(justify left)
++			)
++		)
++		(property "Value" "R"
++			(at 104.14 81.2799 0)
++			(show_name no)
++			(do_not_autoplace no)
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++				(justify left)
++			)
++		)
++		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
++			(at 99.822 80.01 90)
++			(hide yes)
++			(show_name no)
++			(do_not_autoplace no)
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++			)
++		)
++		(property "Datasheet" ""
++			(at 101.6 80.01 0)
++			(hide yes)
++			(show_name no)
++			(do_not_autoplace no)
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++			)
++		)
++		(property "Description" "Resistor"
++			(at 101.6 80.01 0)
++			(hide yes)
++			(show_name no)
++			(do_not_autoplace no)
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++			)
++		)
++		(pin "2"
++			(uuid "dd7a5559-9c49-4994-b823-ff9a52401f79")
++		)
++		(pin "1"
++			(uuid "215bc0b5-fc11-4f12-bacb-99879f4f803c")
++		)
++		(instances
++			(project "TestProject"
++				(path "/0491dce0-5dc3-4fd4-8a65-248d0756821f"
++					(reference "R1")
++					(unit 1)
++					(variant
++						(name "Variant1")
++						(dnp yes)
++					)
++				)
++			)
++		)
++	)
++	(symbol
++		(lib_id "Device:R")
++		(at 111.76 80.01 0)
++		(unit 1)
++		(body_style 1)
++		(exclude_from_sim no)
++		(in_bom yes)
++		(on_board yes)
++		(in_pos_files yes)
++		(dnp no)
++		(fields_autoplaced yes)
++		(uuid "df9a2f78-5968-41ff-8ebc-b17c98d4722d")
++		(property "Reference" "R2"
++			(at 114.3 78.7399 0)
++			(show_name no)
++			(do_not_autoplace no)
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++				(justify left)
++			)
++		)
++		(property "Value" "R"
++			(at 114.3 81.2799 0)
++			(show_name no)
++			(do_not_autoplace no)
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++				(justify left)
++			)
++		)
++		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
++			(at 109.982 80.01 90)
++			(hide yes)
++			(show_name no)
++			(do_not_autoplace no)
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++			)
++		)
++		(property "Datasheet" ""
++			(at 111.76 80.01 0)
++			(hide yes)
++			(show_name no)
++			(do_not_autoplace no)
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++			)
++		)
++		(property "Description" "Resistor"
++			(at 111.76 80.01 0)
++			(hide yes)
++			(show_name no)
++			(do_not_autoplace no)
++			(effects
++				(font
++					(size 1.27 1.27)
++				)
++			)
++		)
++		(pin "2"
++			(uuid "17867555-71b5-4fda-adb8-0039372663ca")
++		)
++		(pin "1"
++			(uuid "1aa82bb8-fb2f-4775-9708-3ce72c39cb99")
++		)
++		(instances
++			(project "TestProject"
++				(path "/0491dce0-5dc3-4fd4-8a65-248d0756821f"
++					(reference "R2")
++					(unit 1)
++					(variant
++						(name "Variant1")
++						(in_bom no)
++					)
++					(variant
++						(name "Variant2")
++					)
++				)
++			)
++		)
++	)
++	(sheet_instances
++		(path "/"
++			(page "1")
++		)
++	)
++	(embedded_fonts no)
++)
+diff --git a/qa/tests/cli/test_common.py b/qa/tests/cli/test_common.py
+index cece184f..652277f5 100644
+--- a/qa/tests/cli/test_common.py
++++ b/qa/tests/cli/test_common.py
+@@ -20,12 +20,14 @@
+ #  MA 02110-1301, USA.
+ #
+ 
+-import pytest
+-import utils
++import json
+ import re
+ import shutil
+ from pathlib import Path
+ 
++import pytest
++import utils
++
+ def test_version():
+     command = [utils.kicad_cli(), "version"]
+     stdout, stderr, exitcode = utils.run_and_capture(command)
+@@ -81,3 +83,35 @@ def test_jobset_run_relative_project_path(tmp_path):
+     # A crash would manifest as a non-zero/negative exit code; the archive must also be produced.
+     assert exitcode == 0
+     assert (work_dir / "output" / "issue24474-gerber.zip").exists()
++def test_jobset_drc_uses_selected_variant(tmp_path):
++    source_dir = Path(__file__).resolve().parent.parent.parent / "data" / "pcbnew" / "issue24900"
++    work_dir = tmp_path / "issue24900"
++    shutil.copytree(source_dir, work_dir)
++
++    command = [
++        utils.kicad_cli(),
++        "jobset", "run",
++        "--file", "TestProject.kicad_jobset",
++        "--output", "f4454cb0-b93f-4f0c-bcdd-e3cd0a2dfc4a",
++        "TestProject.kicad_pro",
++    ]
++
++    stdout, stderr, exitcode = utils.run_and_capture(command, cwd=work_dir)
++
++    assert exitcode == 0, stdout + stderr
++
++    report_path = work_dir / "output" / "TestProject-Variant1-drc.json"
++
++    with report_path.open(encoding="utf-8") as report_file:
++        report = json.load(report_file)
++
++    parity_violations = report["schematic_parity"]
++    assert len(parity_violations) == 2
++
++    dnp_violation = next(v for v in parity_violations if "Do not populate" in v["description"])
++    assert any("R1" in item["description"] for item in dnp_violation["items"])
++
++    bom_violation = next(v for v in parity_violations if "bill of materials" in v["description"])
++    assert any("R2" in item["description"] for item in bom_violation["items"])
++
++
+diff --git a/qa/tests/pcbnew/test_variant.cpp b/qa/tests/pcbnew/test_variant.cpp
+index 70d91336..91c2dfac 100644
+--- a/qa/tests/pcbnew/test_variant.cpp
++++ b/qa/tests/pcbnew/test_variant.cpp
+@@ -31,6 +31,9 @@
+ #include <boost/test/unit_test.hpp>
+ 
+ #include <board.h>
++#include <board_design_settings.h>
++#include <drc/drc_engine.h>
++#include <drc/drc_item.h>
+ #include <footprint.h>
+ #include <lib_id.h>
+ #include <exporters/place_file_exporter.h>
+@@ -1369,4 +1372,76 @@ BOOST_AUTO_TEST_CASE( Issue23298_BaseFootprintHiddenInNonDefaultVariant )
+ }
+ 
+ 
++BOOST_AUTO_TEST_CASE( VariantUpdateLeavesSchematicParityClean )
++{
++    SETTINGS_MANAGER settingsManager;
++    settingsManager.LoadProject( "" );
++
++    std::unique_ptr<BOARD> board = std::make_unique<BOARD>();
++    board->SetProject( &settingsManager.Prj() );
++
++    LIB_ID fpid;
++    BOOST_REQUIRE_EQUAL( fpid.Parse( wxS( "TestLib:R_0603" ) ), -1 );
++
++    FOOTPRINT* footprint = new FOOTPRINT( board.get() );
++    footprint->SetReference( "R1" );
++    footprint->SetValue( "10K" );
++    footprint->SetFPID( fpid );
++    board->Add( footprint );
++
++    NETLIST netlist;
++    netlist.AddVariant( "Variant 1" );
++
++    COMPONENT* component = new COMPONENT( fpid, "R1", "10K", KIID_PATH(), std::vector<KIID>{ KIID() } );
++
++    COMPONENT_VARIANT variant( "Variant 1" );
++    variant.m_dnp = true;
++    variant.m_hasDnp = true;
++    variant.m_excludedFromBOM = true;
++    variant.m_hasExcludedFromBOM = true;
++    variant.m_fields[GetDefaultFieldName( FIELD_T::VALUE, UNTRANSLATED )] = "22K";
++    variant.m_fields["Variant only"] = "fitted";
++    component->AddVariant( variant );
++    netlist.AddComponent( component );
++
++    TOOL_MANAGER toolMgr;
++    toolMgr.SetEnvironment( board.get(), nullptr, nullptr, nullptr, nullptr );
++    toolMgr.RegisterTool( new KI_TEST::DUMMY_TOOL() );
++
++    BOARD_NETLIST_UPDATER updater( &toolMgr, board.get() );
++    updater.SetReplaceFootprints( false );
++    updater.SetDeleteUnusedFootprints( false );
++
++    BOOST_REQUIRE( updater.UpdateNetlist( netlist ) );
++    BOOST_CHECK( footprint->GetDNPForVariant( "Variant 1" ) );
++    BOOST_CHECK( footprint->GetExcludedFromBOMForVariant( "Variant 1" ) );
++    BOOST_CHECK_EQUAL( footprint->GetFieldValueForVariant( "Variant 1", "Variant only" ), "fitted" );
++
++    board->SetCurrentVariant( "Variant 1" );
++
++    BOARD_DESIGN_SETTINGS& bds = board->GetDesignSettings();
++    bds.m_DRCEngine = std::make_shared<DRC_ENGINE>( board.get(), &bds );
++    bds.m_DRCEngine->InitEngine( wxFileName() );
++    bds.m_DRCEngine->SetSchematicNetlist( &netlist );
++
++    std::vector<DRC_ITEM> parityViolations;
++
++    bds.m_DRCEngine->SetViolationHandler(
++            [&]( const std::shared_ptr<DRC_ITEM>& aItem, const VECTOR2I&, int,
++                 const std::function<void( PCB_MARKER* )>& )
++            {
++                if( aItem->GetErrorCode() == DRCE_SCHEMATIC_PARITY
++                    || aItem->GetErrorCode() == DRCE_SCHEMATIC_FIELDS_PARITY )
++                {
++                    parityViolations.push_back( *aItem );
++                }
++            } );
++
++    bds.m_DRCEngine->RunTests( EDA_UNITS::MM, true, true );
++    bds.m_DRCEngine->ClearViolationHandler();
++
++    BOOST_CHECK( parityViolations.empty() );
++}
++
++
+ BOOST_AUTO_TEST_SUITE_END()
+-- 
+2.43.0
+

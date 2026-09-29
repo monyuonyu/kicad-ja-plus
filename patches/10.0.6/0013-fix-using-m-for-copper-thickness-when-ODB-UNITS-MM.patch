@@ -1,0 +1,37 @@
+From 535f43afcbbbf6ae81b64e310a5480a14ae2b560 Mon Sep 17 00:00:00 2001
+From: Petra Bernd <frosted.passers-3k@icloud.com>
+Date: Fri, 22 May 2026 19:04:53 -0700
+Subject: [PATCH 13/29] =?UTF-8?q?fix:=20using=20=C2=B5m=20for=20copper=20t?=
+ =?UTF-8?q?hickness=20when=20ODB=20UNITS=3DMM?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ pcbnew/pcb_io/odbpp/odb_entity.cpp | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/pcbnew/pcb_io/odbpp/odb_entity.cpp b/pcbnew/pcb_io/odbpp/odb_entity.cpp
+index 68263b63..43e7ed18 100644
+--- a/pcbnew/pcb_io/odbpp/odb_entity.cpp
++++ b/pcbnew/pcb_io/odbpp/odb_entity.cpp
+@@ -1171,10 +1171,14 @@ void ODB_LAYER_ENTITY::GenAttrList( ODB_TREE_WRITER& writer )
+                 // Convert mm to oz/sqft
+                 thicknessOut /= 0.035;
+             }
++            else
++            {
++                // Convert mm to µm
++                thicknessOut *= 1000;
++            }
+             ost << ".copper_weight=" << ODB::Double2String( thicknessOut ) << std::endl;
+         }
+-        else if( stackupType == BOARD_STACKUP_ITEM_TYPE::BS_ITEM_TYPE_DIELECTRIC
+-                 || stackupType == BOARD_STACKUP_ITEM_TYPE::BS_ITEM_TYPE_SOLDERMASK )
++        else if( stackupType == BS_ITEM_TYPE_DIELECTRIC || stackupType == BS_ITEM_TYPE_SOLDERMASK )
+         {
+             double thicknessOut = PCB_IO_ODBPP::m_scale * thickness;
+             ost << ".layer_dielectric=" << ODB::Double2String( thicknessOut ) << std::endl;
+-- 
+2.43.0
+

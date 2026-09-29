@@ -1,0 +1,70 @@
+From 037a2e1f1dcdbd62431d3323f3a3270785260a38 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Tue, 29 Sep 2026 08:39:20 +0900
+Subject: [PATCH 24/29] 08: use the 10.0 SHAPE_POLY_SET interface (no PM_FAST
+ argument), as in KiCad 11
+
+---
+ gerbview/gerber_diff.cpp       | 12 ++++++------
+ gerbview/gerber_to_polyset.cpp |  4 ++--
+ 2 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/gerbview/gerber_diff.cpp b/gerbview/gerber_diff.cpp
+index 408bb4f7..adb6bd24 100644
+--- a/gerbview/gerber_diff.cpp
++++ b/gerbview/gerber_diff.cpp
+@@ -45,15 +45,15 @@ GERBER_DIFF_RESULT CalculateGerberDiff( const SHAPE_POLY_SET& aReference, const
+ 
+     // overlap = reference ∩ comparison
+     result.overlap = aReference;
+-    result.overlap.BooleanIntersection( aComparison, SHAPE_POLY_SET::PM_FAST );
++    result.overlap.BooleanIntersection( aComparison );
+ 
+     // additions = comparison - reference
+     result.additions = aComparison;
+-    result.additions.BooleanSubtract( aReference, SHAPE_POLY_SET::PM_FAST );
++    result.additions.BooleanSubtract( aReference );
+ 
+     // removals = reference - comparison
+     result.removals = aReference;
+-    result.removals.BooleanSubtract( aComparison, SHAPE_POLY_SET::PM_FAST );
++    result.removals.BooleanSubtract( aComparison );
+ 
+     result.overlapArea = result.overlap.Area() * IU2_TO_MM2;
+     result.additionsArea = result.additions.Area() * IU2_TO_MM2;
+@@ -72,9 +72,9 @@ GERBER_DIFF_RESULT CalculateGerberDiff( const SHAPE_POLY_SET& aReference, const
+ 
+     // Fracture so that holes become bridge-connected outlines suitable for rendering
+     // with PlotPoly (which only fills outlines, ignoring SHAPE_POLY_SET holes).
+-    result.overlap.Fracture( SHAPE_POLY_SET::PM_FAST );
+-    result.additions.Fracture( SHAPE_POLY_SET::PM_FAST );
+-    result.removals.Fracture( SHAPE_POLY_SET::PM_FAST );
++    result.overlap.Fracture();
++    result.additions.Fracture();
++    result.removals.Fracture();
+ 
+     return result;
+ }
+diff --git a/gerbview/gerber_to_polyset.cpp b/gerbview/gerber_to_polyset.cpp
+index e623c35a..6df050c1 100644
+--- a/gerbview/gerber_to_polyset.cpp
++++ b/gerbview/gerber_to_polyset.cpp
+@@ -107,13 +107,13 @@ SHAPE_POLY_SET ConvertGerberToPolySet( GERBER_FILE_IMAGE* aImage, int aTolerance
+         // Handle negative polygons: they are subtracted to previous polygons
+         if( negativePolygons.OutlineCount() > 0 )
+         {
+-            positivePolygons.BooleanSubtract( negativePolygons, SHAPE_POLY_SET::PM_FAST );
++            positivePolygons.BooleanSubtract( negativePolygons );
+             negativePolygons.RemoveAllContours();
+         }
+     }
+ 
+     // Single-pass union of all positive items
+-    positivePolygons.Simplify( SHAPE_POLY_SET::PM_FAST );
++    positivePolygons.Simplify();
+ 
+     mergedPolygons = std::move( positivePolygons );
+ 
+-- 
+2.43.0
+

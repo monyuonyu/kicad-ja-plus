@@ -1,4 +1,4 @@
-# KiCad 8.0.9 に改良を当ててビルドし、回帰試験を流す
+# KiCad に改良を当ててビルドし、回帰試験を流す（Linux、版ごと）
 name: Build and test
 on:
   push:
@@ -7,48 +7,62 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: "10.0.6"
+            ppa: kicad-10.0-releases
+            deps: patches/10.0.6/builddeps.txt
+            # 10.0.6 の kicad_route・kicad_gerber は画面なしで動く
+            runner: ""
+          - version: "8.0.9"
+            ppa: kicad-8.0-releases
+            deps: patches/8.0.9/notes/builddeps.txt
+            # 8.0.9 の kicad_route・kicad_gerber は起動時に GTK を要るので、仮想の画面で
+            runner: "xvfb-run -a"
     steps:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
-          # 部品ライブラリと、比べるための kicad-cli はシステムの KiCad 8（24.04 の標準は 7 なので PPA から）
-          sudo add-apt-repository -y ppa:kicad/kicad-8.0-releases
+          # 部品ライブラリと、比べるための kicad-cli はシステムの KiCad（同じ系列を PPA から）
+          sudo add-apt-repository -y ppa:kicad/${{ matrix.ppa }}
           sudo apt-get update
-          sudo apt-get install -y $(cat patches/notes/builddeps.txt) kicad ccache \
+          sudo apt-get install -y $(cat ${{ matrix.deps }}) kicad ccache \
             python3-numpy python3-matplotlib python3-pil fonts-ipaexfont-gothic xvfb
 
-      - name: Get KiCad 8.0.9 and apply the patches
-        run: ./apply.sh "$HOME/src/kicad-8.0.9"
+      - name: Get KiCad and apply the patches
+        run: ./apply.sh ${{ matrix.version }} "$HOME/src/kicad-${{ matrix.version }}"
 
       - uses: actions/cache@v4
         with:
           path: ~/.cache/ccache
-          key: ccache-${{ hashFiles('patches/ALL-combined.patch') }}
-          restore-keys: ccache-
+          key: ccache-${{ matrix.version }}-${{ hashFiles(format('patches/{0}/**', matrix.version)) }}
+          restore-keys: ccache-${{ matrix.version }}-
 
       - name: Configure
         run: |
-          cmake -S "$HOME/src/kicad-8.0.9" -B "$HOME/src/build-8.0.9" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+          cmake -S "$HOME/src/kicad-${{ matrix.version }}" -B "$HOME/src/build-${{ matrix.version }}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DKICAD_BUILD_PNS_DEBUG_TOOL=ON -DKICAD_SCRIPTING_WXPYTHON=OFF -DKICAD_BUILD_I18N=OFF
 
       - name: Build
         run: |
-          ninja -C "$HOME/src/build-8.0.9" -j4 kicad-cli pcbnew_kiface eeschema_kiface cvpcb_kiface \
+          ninja -C "$HOME/src/build-${{ matrix.version }}" -j4 kicad-cli pcbnew_kiface eeschema_kiface cvpcb_kiface \
             kicad_route kicad_gerber pcbnew/_pcbnew.so s3d_plugin_vrml s3d_plugin_oce s3d_plugin_idf
 
       - name: Regression test
         run: |
-          export PATH="$PWD/bin:$PATH"
-          # 8.0.9 の kicad_route と kicad_gerber は起動時に GTK を初期化するので、画面の無い所では仮想の画面が要る
-          xvfb-run -a test/regress.sh
+          export PATH="$PWD/bin:$PATH" KICAD_LOCAL_BUILD="$HOME/src/build-${{ matrix.version }}"
+          ${{ matrix.runner }} test/regress.sh
 
       - name: Keep the test output
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: regress-now
+          name: regress-now-${{ matrix.version }}
           path: test/now/
           if-no-files-found: ignore

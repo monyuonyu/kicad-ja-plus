@@ -1,0 +1,41 @@
+From 88c5da81d88d9541662b6c5c8d9450bbc7f37cfa Mon Sep 17 00:00:00 2001
+From: Petra Bernd <frosted.passers-3k@icloud.com>
+Date: Mon, 20 Apr 2026 21:07:10 -0700
+Subject: [PATCH 12/29] change: only add layer_dielectric on DIELECTRIC and
+ SOLDERMASK layers
+
+---
+ pcbnew/pcb_io/odbpp/odb_entity.cpp | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/pcbnew/pcb_io/odbpp/odb_entity.cpp b/pcbnew/pcb_io/odbpp/odb_entity.cpp
+index f9fee503..68263b63 100644
+--- a/pcbnew/pcb_io/odbpp/odb_entity.cpp
++++ b/pcbnew/pcb_io/odbpp/odb_entity.cpp
+@@ -1157,11 +1157,12 @@ void ODB_LAYER_ENTITY::GenAttrList( ODB_TREE_WRITER& writer )
+ 
+     if( stackupItem )
+     {
++        BOARD_STACKUP_ITEM_TYPE stackupType = stackupItem->GetType();
+         int thickness = stackupItem->GetThickness();
+ 
+         ost << "UNITS=" << PCB_IO_ODBPP::m_unitsStr << std::endl;
+ 
+-        if( stackupItem->GetType() == BS_ITEM_TYPE_COPPER )
++        if( stackupType == BS_ITEM_TYPE_COPPER )
+         {
+             double thicknessOut = static_cast<double>( thickness ) / pcbIUScale.mmToIU( 1.0 );
+ 
+@@ -1172,7 +1173,8 @@ void ODB_LAYER_ENTITY::GenAttrList( ODB_TREE_WRITER& writer )
+             }
+             ost << ".copper_weight=" << ODB::Double2String( thicknessOut ) << std::endl;
+         }
+-        else
++        else if( stackupType == BOARD_STACKUP_ITEM_TYPE::BS_ITEM_TYPE_DIELECTRIC
++                 || stackupType == BOARD_STACKUP_ITEM_TYPE::BS_ITEM_TYPE_SOLDERMASK )
+         {
+             double thicknessOut = PCB_IO_ODBPP::m_scale * thickness;
+             ost << ".layer_dielectric=" << ODB::Double2String( thicknessOut ) << std::endl;
+-- 
+2.43.0
+

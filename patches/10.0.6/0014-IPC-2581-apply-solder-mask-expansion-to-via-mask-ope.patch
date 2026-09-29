@@ -1,0 +1,66 @@
+From 1b9e43d0d7774c4044d1fcdf5a6c68799ff4b0b0 Mon Sep 17 00:00:00 2001
+From: Akhil Velagapudi <akhilvelagapudi@gmail.com>
+Date: Wed, 1 Jul 2026 16:57:23 -0400
+Subject: [PATCH 14/29] IPC-2581: apply solder mask expansion to via mask
+ openings
+
+Mask openings of untented vias were exported at the bare copper
+diameter, both in the LayerFeature pad and in the padstack definition's
+mask entry, while the board plotter grows the opening by twice the
+solder mask expansion.  Bake the expansion into the exported diameter
+on the mask layers.
+
+Fixes https://gitlab.com/kicad/code/kicad/-/issues/24749
+---
+ pcbnew/pcb_io/ipc2581/pcb_io_ipc2581.cpp | 22 ++++++++++++++++++++--
+ 1 file changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/pcbnew/pcb_io/ipc2581/pcb_io_ipc2581.cpp b/pcbnew/pcb_io/ipc2581/pcb_io_ipc2581.cpp
+index a959998e..ecd1d249 100644
+--- a/pcbnew/pcb_io/ipc2581/pcb_io_ipc2581.cpp
++++ b/pcbnew/pcb_io/ipc2581/pcb_io_ipc2581.cpp
+@@ -2331,11 +2331,18 @@ void PCB_IO_IPC2581::addVia( wxXmlNode* aContentNode, const PCB_VIA* aVia, PCB_L
+     addPadStack( padNode, aVia );
+     addLocationNode( padNode, aVia->GetPosition().x, aVia->GetPosition().y );
+ 
++    int width = aVia->GetWidth( aLayer );
++
++    // Mask openings of untented vias include the solder mask expansion, matching the plotted
++    // artwork.
++    if( IsSolderMaskLayer( aLayer ) )
++        width += 2 * aVia->GetSolderMaskExpansion();
++
+     PAD dummy( nullptr );
+     int hole = aVia->GetDrillValue();
+     dummy.SetDrillSize( VECTOR2I( hole, hole ) );
+     dummy.SetPosition( aVia->GetStart() );
+-    dummy.SetSize( aLayer, VECTOR2I( aVia->GetWidth( aLayer ), aVia->GetWidth( aLayer ) ) );
++    dummy.SetSize( aLayer, VECTOR2I( width, width ) );
+ 
+     addShape( padNode, dummy, aLayer );
+ }
+@@ -2446,9 +2453,20 @@ void PCB_IO_IPC2581::addPadStack( wxXmlNode* aContentNode, const PCB_VIA* aVia )
+                           PCB_SHAPE shape( nullptr, SHAPE_T::CIRCLE );
+ 
+                           if( aDrill )
++                          {
+                               shape.SetEnd( { KiROUND( aViaShape->GetDrillValue() / 2.0 ), 0 } );
++                          }
+                           else
+-                              shape.SetEnd( { KiROUND( aViaShape->GetWidth( aLayer ) / 2.0 ), 0 } );
++                          {
++                              int width = aViaShape->GetWidth( aLayer );
++
++                              // Mask entries of untented vias include the solder mask
++                              // expansion, matching the plotted artwork.
++                              if( IsSolderMaskLayer( aLayer ) )
++                                  width += 2 * aViaShape->GetSolderMaskExpansion();
++
++                              shape.SetEnd( { KiROUND( width / 2.0 ), 0 } );
++                          }
+ 
+                           wxXmlNode* padStackPadDefNode =
+                                   appendNode( padStackDefNode, "PadstackPadDef" );
+-- 
+2.43.0
+

@@ -1,0 +1,30 @@
+From 730a76d88c0f6100017cf93b23e5b9d88ad7cae0 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Tue, 29 Sep 2026 07:36:07 +0900
+Subject: [PATCH 01/29] router: clear SpringbackDoNotTouchNode when m_endItem
+ is null (from master 3b1c8e7ba)
+
+---
+ pcbnew/router/pns_line_placer.cpp | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/pcbnew/router/pns_line_placer.cpp b/pcbnew/router/pns_line_placer.cpp
+index 9ff06ddf..8712d112 100644
+--- a/pcbnew/router/pns_line_placer.cpp
++++ b/pcbnew/router/pns_line_placer.cpp
+@@ -948,6 +948,12 @@ bool LINE_PLACER::rhShoveOnly( const VECTOR2I& aP, LINE& aNewHead, LINE& aNewTai
+         // Make sure the springback algorithm won't erase the NODE that owns m_endItem.
+         m_shove->SetSpringbackDoNotTouchNode( static_cast<const NODE*>( m_endItem->Owner() ) );
+     }
++    else
++    {
++        // No end item under the cursor anymore. Clear the DoNotTouchNode so springback
++        // can roll back past frames pinned by an earlier obstacle touch.
++        m_shove->SetSpringbackDoNotTouchNode( nullptr );
++    }
+ 
+     LINE newHead( walkSolids );
+ 
+-- 
+2.43.0
+

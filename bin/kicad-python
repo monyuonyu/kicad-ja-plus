@@ -3,6 +3,6 @@
 # (修正: ~/src/kicad-8.0.9/tools/build/fix_swig_ownership_refcount.py)
 # このリポジトリの場所(道具と試験を探す)と、修正版 KiCad をビルドした場所
 KICAD_LOCAL_HOME=${KICAD_LOCAL_HOME:-$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)}
-KICAD_LOCAL_BUILD=${KICAD_LOCAL_BUILD:-$HOME/src/build-8.0.9}
+KICAD_LOCAL_BUILD=${KICAD_LOCAL_BUILD:-$HOME/src/build-10.0.6}
 export KICAD_LOCAL_HOME KICAD_LOCAL_BUILD
 PYTHONPATH="$KICAD_LOCAL_BUILD/pcbnew${PYTHONPATH:+:$PYTHONPATH}" exec python3 "$@"

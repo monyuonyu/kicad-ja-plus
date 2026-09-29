@@ -1,0 +1,203 @@
+From 8b74ff49e2b2e9489582a81d866697e2fa781d1d Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Tue, 29 Sep 2026 07:36:07 +0900
+Subject: [PATCH 02/29] 04: drag: walk the attached tracks around obstacles (MR
+ !2188)
+
+---
+ pcbnew/router/pns_component_dragger.cpp | 143 ++++++++++++++++++++++--
+ pcbnew/router/pns_component_dragger.h   |   4 +-
+ 2 files changed, 136 insertions(+), 11 deletions(-)
+
+diff --git a/pcbnew/router/pns_component_dragger.cpp b/pcbnew/router/pns_component_dragger.cpp
+index c9c2c41d..43d4bdda 100644
+--- a/pcbnew/router/pns_component_dragger.cpp
++++ b/pcbnew/router/pns_component_dragger.cpp
+@@ -27,6 +27,8 @@
+ #include "pns_router.h"
+ 
+ #include "pns_component_dragger.h"
++#include "pns_walkaround.h"
++#include "pns_optimizer.h"
+ #include "pns_debug_decorator.h"
+ 
+ namespace PNS
+@@ -225,25 +227,146 @@ bool COMPONENT_DRAGGER::Drag( const VECTOR2I& aP )
+         }
+     }
+ 
+-    for( COMPONENT_DRAGGER::DRAGGED_CONNECTION& cn : m_conns )
++    // KiCad MR !2188 から移植: 部品を動かしたとき、つながっている線を押しのけずに迂回させて引き直す。
++    // まず全接続を試し、失敗したもの・長くなったものから順に、最適化付きでもう一度引き直す。
++    for( const COMPONENT_DRAGGER::DRAGGED_CONNECTION& cn : m_conns )
+     {
+-        LINE l_new( cn.origLine );
+-        l_new.Unmark();
+-        l_new.ClearLinks();
+-        l_new.DragCorner( cn.p_next, cn.origLine.CLine().Find( cn.p_orig ) );
++        LINE origLine( cn.origLine );
++        m_currentNode->Remove( origLine );
++    }
++
++    std::map<long long, std::set<int>> toRouteOrder;
++    std::set<int>                      firstToRoute;
++
++    for( int i = 0; i < (int) m_conns.size(); i++ )
++        firstToRoute.emplace( i );
++
++    toRouteOrder.emplace( 0, firstToRoute );
++
++    std::map<int, LINE> addedLines;
++    std::set<int>       failedConnections;
++
++    auto routeConnection = [&]( int aCn, bool aOptimize )
++    {
++        const COMPONENT_DRAGGER::DRAGGED_CONNECTION& cn = m_conns[aCn];
++        bool                                         status = true;
++
++        LINE origLine( cn.origLine );
++        LINE draggedLine( cn.origLine );
++
++        draggedLine.Unmark();
++        draggedLine.ClearLinks();
++        draggedLine.DragCorner( cn.p_next, origLine.CLine().Find( cn.p_orig ) );
++
++        if( Settings().Mode() != RM_MarkObstacles )
++        {
++            LINE walkLine( draggedLine );
++
++            status = tryWalkaround( m_currentNode, draggedLine, walkLine );
++
++            if( status )
++            {
++                if( aOptimize )
++                {
++                    OPTIMIZER optimizer( m_currentNode );
++
++                    int effort = OPTIMIZER::MERGE_SEGMENTS | OPTIMIZER::KEEP_TOPOLOGY
++                                 | OPTIMIZER::RESTRICT_AREA;
++
++                    if( Settings().SmoothDraggedSegments() )
++                        effort |= OPTIMIZER::MERGE_COLINEAR;
++
++                    optimizer.SetEffortLevel( effort );
++
++                    OPT_BOX2I affectedArea = walkLine.ChangedArea( &origLine );
++                    VECTOR2I  anchor( aP );
++
++                    if( walkLine.CLine().Find( aP ) < 0 )
++                        anchor = walkLine.CLine().NearestPoint( aP );
+ 
+-        PNS_DBG( Dbg(), AddItem, &l_new, BLUE, 0, wxT( "cdrag-new-fanout" ) );
+-        m_draggedItems.Add( l_new );
++                    optimizer.SetPreserveVertex( anchor );
+ 
+-        LINE l_orig( cn.origLine );
+-        m_currentNode->Remove( l_orig );
+-        m_currentNode->Add( l_new );
++                    if( !affectedArea )
++                        affectedArea = BOX2I( aP ); // 領域がまだない → 最小にして最適化を実質止める
++
++                    optimizer.SetRestrictArea( *affectedArea );
++                    walkLine.Line().Split( anchor );
++                    optimizer.Optimize( &walkLine, &draggedLine, &origLine );
++                }
++                else
++                {
++                    draggedLine = walkLine;
++                }
++            }
++        }
++
++        m_currentNode->Add( draggedLine );
++        addedLines.emplace( aCn, draggedLine );
++
++        return status;
++    };
++
++    for( auto& [_, toRouteSet] : toRouteOrder )
++    {
++        for( int cnId : toRouteSet )
++        {
++            if( !routeConnection( cnId, false ) )
++                failedConnections.emplace( cnId );
++        }
++    }
++
++    // これ以上長くなった線は、失敗した接続より先に引き直す
++    const long long c_failed_vs_length = pcbIUScale.mmToIU( 100 );
++
++    toRouteOrder.clear();
++    toRouteOrder[-c_failed_vs_length] = failedConnections;
++
++    for( auto& [cId, newLine] : addedLines )
++    {
++        if( failedConnections.count( cId ) == 0 )
++        {
++            long long increase = newLine.Line().Length() - m_conns[cId].origLine.Line().Length();
++            toRouteOrder[-increase].emplace( cId );
++        }
+     }
+ 
++    for( auto& [_, line] : addedLines )
++        m_currentNode->Remove( line );
++
++    addedLines.clear();
++    failedConnections.clear();
++
++    for( auto& [_, toRouteSet] : toRouteOrder )
++    {
++        for( int cnId : toRouteSet )
++        {
++            if( !routeConnection( cnId, true ) )
++                failedConnections.emplace( cnId );
++        }
++    }
++
++    for( auto& [_, line] : addedLines )
++        m_draggedItems.Add( line );
++
+     return true;
+ }
+ 
+ 
++// KiCad MR !2188 から移植(8.0.9 の WALKAROUND::Route に合わせて調整)
++bool COMPONENT_DRAGGER::tryWalkaround( NODE* aNode, LINE& aOrig, LINE& aWalk )
++{
++    WALKAROUND walkaround( aNode, Router() );
++    walkaround.SetSolidsOnly( false );
++    walkaround.SetDebugDecorator( Dbg() );
++    walkaround.SetLogger( Logger() );
++    walkaround.SetIterationLimit( Settings().WalkaroundIterationLimit() );
++    walkaround.SetLengthLimit( true );
++
++    aWalk = aOrig;
++    return walkaround.Route( aOrig, aWalk, false ) == WALKAROUND::DONE;
++}
++
++
+ bool COMPONENT_DRAGGER::FixRoute( bool aForceCommit )
+ {
+     NODE* node = CurrentNode();
+diff --git a/pcbnew/router/pns_component_dragger.h b/pcbnew/router/pns_component_dragger.h
+index 3373754d..7dd88994 100644
+--- a/pcbnew/router/pns_component_dragger.h
++++ b/pcbnew/router/pns_component_dragger.h
+@@ -120,11 +120,13 @@ private:
+     struct DRAGGED_CONNECTION
+     {
+         LINE     origLine;
+-        SOLID*   attachedPad;
++        SOLID*   attachedPad = nullptr;
+         VECTOR2I p_orig, p_next;
+         VECTOR2I offset;
+     };
+ 
++    bool tryWalkaround( NODE* aNode, LINE& aOrig, LINE& aWalk );   // MR !2188
++
+     std::set<SOLID*>                m_solids;       // Pads being dragged
+     std::set<ITEM*>                 m_fixedItems;   // Items being moved along with pads
+     std::vector<DRAGGED_CONNECTION> m_conns;        // Lines being dragged with pads
+-- 
+2.43.0
+

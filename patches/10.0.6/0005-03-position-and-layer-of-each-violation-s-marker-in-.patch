@@ -1,0 +1,158 @@
+From f3ff058a50924b0985d469eba75fb1a01d829116 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Tue, 29 Sep 2026 07:38:21 +0900
+Subject: [PATCH 05/29] 03: position and layer of each violation's marker in
+ the DRC JSON report (MR !2780)
+
+Also fixes the trailing comma that made resources/schemas/drc.v1.json invalid JSON.
+---
+ include/rc_json_schema.h      | 19 +++++++++++++++++++
+ pcbnew/drc/drc_report.cpp     | 24 ++++++++++++++++++++++++
+ resources/schemas/drc.v1.json | 10 +++++++++-
+ 3 files changed, 52 insertions(+), 1 deletion(-)
+
+diff --git a/include/rc_json_schema.h b/include/rc_json_schema.h
+index 7f3c0420..9bbf9cee 100644
+--- a/include/rc_json_schema.h
++++ b/include/rc_json_schema.h
+@@ -22,6 +22,7 @@
+ 
+ #include <json_common.h>
+ #include <wx/string.h>
++#include <optional>
+ #include <vector>
+ #include <json_conversions.h>
+ 
+@@ -60,6 +61,8 @@ struct VIOLATION
+     std::vector<AFFECTED_ITEM> items;
+     bool                       excluded;
+     wxString                   comment;     // exclusion comment; if any
++    std::optional<COORDINATE>  pos;         // ported from KiCad MR !2780: position of the marker
++    wxString                   layer;       // and its layer
+ };
+ 
+ inline void to_json( nlohmann::json& aJson, const VIOLATION& aViolation )
+@@ -74,6 +77,12 @@ inline void to_json( nlohmann::json& aJson, const VIOLATION& aViolation )
+         aJson["excluded"] = aViolation.excluded;
+         aJson["comment"] = aViolation.comment;
+     }
++
++    if( aViolation.pos )
++        aJson["pos"] = *aViolation.pos;
++
++    if( !aViolation.layer.IsEmpty() )
++        aJson["layer"] = aViolation.layer;
+ }
+ 
+ inline void from_json( const nlohmann::json& aJson, VIOLATION& aViolation )
+@@ -84,6 +93,16 @@ inline void from_json( const nlohmann::json& aJson, VIOLATION& aViolation )
+     aJson.at( "items" ).get_to( aViolation.items );
+     aJson.at( "excluded" ).get_to( aViolation.excluded );
+     aJson.at( "comment" ).get_to( aViolation.comment );
++
++    if( aJson.contains( "pos" ) )
++        aViolation.pos = aJson.at( "pos" ).get<COORDINATE>();
++    else
++        aViolation.pos.reset();
++
++    if( aJson.contains( "layer" ) )
++        aJson.at( "layer" ).get_to( aViolation.layer );
++    else
++        aViolation.layer.clear();
+ }
+ 
+ 
+diff --git a/pcbnew/drc/drc_report.cpp b/pcbnew/drc/drc_report.cpp
+index 95b30c29..00808de2 100644
+--- a/pcbnew/drc/drc_report.cpp
++++ b/pcbnew/drc/drc_report.cpp
+@@ -27,6 +27,7 @@
+ #include <board_design_settings.h>
+ #include <build_version.h>
+ #include <drc/drc_item.h>
++#include <pcb_marker.h>
+ #include <locale_io.h>
+ #include <macros.h>
+ #include <json_common.h>
+@@ -168,6 +169,26 @@ bool DRC_REPORT::WriteJsonReport( const wxString& aFullFileName )
+     if( m_reportedSeverities & RPT_SEVERITY_EXCLUSION )
+         reportHead.included_severities.push_back( wxS( "exclusion" ) );
+ 
++    // Ported from KiCad MR !2780: the position and layer of each violation's marker
++    auto setMarkerLocation =
++            [&]( const std::shared_ptr<RC_ITEM>& aItem, RC_JSON::VIOLATION& aViolation )
++            {
++                const PCB_MARKER* marker = dynamic_cast<const PCB_MARKER*>( aItem->GetParent() );
++
++                if( !marker )
++                    return;
++
++                RC_JSON::COORDINATE pos;
++                pos.x = EDA_UNIT_UTILS::UI::ToUserUnit( pcbIUScale, m_reportUnits,
++                                                        marker->GetPosition().x );
++                pos.y = EDA_UNIT_UTILS::UI::ToUserUnit( pcbIUScale, m_reportUnits,
++                                                        marker->GetPosition().y );
++                aViolation.pos = pos;
++
++                if( IsValidLayer( marker->GetLayer() ) )
++                    aViolation.layer = m_board->GetLayerName( marker->GetLayer() );
++            };
++
+     for( int i = 0; i < m_markersProvider->GetCount(); ++i )
+     {
+         const std::shared_ptr<RC_ITEM>& item = m_markersProvider->GetItem( i );
+@@ -178,6 +199,7 @@ bool DRC_REPORT::WriteJsonReport( const wxString& aFullFileName )
+ 
+         RC_JSON::VIOLATION violation;
+         item->GetJsonViolation( violation, &unitsProvider, severity, itemMap );
++        setMarkerLocation( item, violation );
+ 
+         reportHead.violations.push_back( violation );
+     }
+@@ -189,6 +211,7 @@ bool DRC_REPORT::WriteJsonReport( const wxString& aFullFileName )
+ 
+         RC_JSON::VIOLATION violation;
+         item->GetJsonViolation( violation, &unitsProvider, severity, itemMap );
++        setMarkerLocation( item, violation );
+ 
+         reportHead.unconnected_items.push_back( violation );
+     }
+@@ -201,6 +224,7 @@ bool DRC_REPORT::WriteJsonReport( const wxString& aFullFileName )
+ 
+         RC_JSON::VIOLATION violation;
+         item->GetJsonViolation( violation, &unitsProvider, severity, itemMap );
++        setMarkerLocation( item, violation );
+ 
+         reportHead.schematic_parity.push_back( violation );
+     }
+diff --git a/resources/schemas/drc.v1.json b/resources/schemas/drc.v1.json
+index c5b2a36e..aea1c2c5 100644
+--- a/resources/schemas/drc.v1.json
++++ b/resources/schemas/drc.v1.json
+@@ -89,7 +89,7 @@
+     "violations",
+     "unconnected_items",
+     "schematic_parity",
+-    "coordinate_units",
++    "coordinate_units"
+   ],
+   "definitions": {
+     "Violation": {
+@@ -117,6 +117,14 @@
+           "type": "boolean",
+           "default": false
+         },
++        "pos": {
++          "$ref": "#/definitions/Coordinate",
++          "description": "Position of the violation's marker"
++        },
++        "layer": {
++          "type": "string",
++          "description": "Layer of the violation's marker"
++        },
+         "comment": {
+           "type": "string",
+           "description": "Optional comment for an excluded violation"
+-- 
+2.43.0
+

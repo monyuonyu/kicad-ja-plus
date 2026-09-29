@@ -1,0 +1,43 @@
+# KiCad 10.0.6 への改良
+
+元にしたもの: KiCad 10.0.6（`caf7377e`、[公式ミラー](https://github.com/KiCad/kicad-source-mirror)）。`../../apply.sh 10.0.6` が番号順に当てる。
+ファイルの形式は 10.0 のまま（本家の KiCad 10 で開ける）。
+
+## このリポジトリの改良（8.0.9 版からの移植）
+
+| パッチ | 内容 | 10.0.6 での扱い |
+|---|---|---|
+| 0027・0029 | kicad_route（画面なしの押しのけ配線ルーター）と、その使い勝手（07） | 10.0 の中の仕組みに合わせた（`SetPgm()`、層ごとのビアの径と円弧の形、DRC の報告の型、`ResolveItem()` ほか）。**画面（DISPLAY）が無くても動く**ようにした（8.0.9 は GTK を初期化していた）。ルーターと基板の層の番号の変換を入れた（9.0 から番号が違う） |
+| 0004 | SWIG の所有権の切り替えで型の対応表が壊れる不具合の修正（00） | そのまま（SWIG 4.2 でも同じ不具合がある） |
+| 0005 | DRC の JSON に違反の位置と層（本家 MR !2780） | 10.0 の書き方に合わせた。本家の `drc.v1.json` が JSON として壊れていた（末尾のカンマ）のも直した |
+| 0002・0006 | 部品を動かすとき、つながった線を迂回させて引き直す（本家 MR !2188） | 10.0 の迂回の処理の呼び方に合わせた |
+| 0003・0024・0028 | kicad_gerber（ガーバーの情報と差分。KiCad 11 から） | 10.0 の多角形の処理に合わせ、画面なしで動くようにした |
+| 0001 | ルーターの修正（本家 master 3b1c8e7ba） | 8.0.9 で取り込んだ 19 件のうち、10.0.6 に入っていなかった 1 件 |
+| 0026 | gEDA の読み込みを MinGW（Windows）でビルドできるように | 10.0.6 の Windows 版のビルドで見つけた |
+
+8.0.9 で取り込んだ残りのもの（ルーターの修正 18 件、`drc --refill-zones`、`pcb export stats`、`pcb render`）は 10.0.6 に元から入っている。
+
+## 本家の MR から取り込んだもの
+
+オープンの MR 97 件から、下書きを除く 85 件を調べ、10.0.6 に当たって効果があり、レビューで問題を指摘されていないものを選んだ。作者の名前はパッチに残している。
+
+| パッチ | MR | 内容 |
+|---|---|---|
+| 0007〜0013 | [!2562](https://gitlab.com/kicad/code/kicad/-/merge_requests/2562) | ODB++ の層の属性に必須の `UNITS=` が無い（規格違反） |
+| 0014 | [!2665](https://gitlab.com/kicad/code/kicad/-/merge_requests/2665) | IPC-2581: テンティングしないビアのマスク開口にマスク拡張量を足す |
+| 0019 | [!2668](https://gitlab.com/kicad/code/kicad/-/merge_requests/2668) | IPC-2581: 穴のあるパッドの形が円に潰れる |
+| 0020 | [!2667](https://gitlab.com/kicad/code/kicad/-/merge_requests/2667) | IPC-2581: 塗りつぶした矩形に線を描かない（規格 3.5.9.14） |
+| 0023・0025 | [!2770](https://gitlab.com/kicad/code/kicad/-/merge_requests/2770) | DRC の回路図との整合チェックが、選んだバリアントを見ていない（DNP・部品表の除外・欄の誤検出と見逃し）。`kicad-cli pcb drc --variant` にも効く。10.0 に無い部分（シミュレーションからの除外の比較）は外した |
+| 0021 | [!2555](https://gitlab.com/kicad/code/kicad/-/merge_requests/2555) | kicad-cli の `--theme` に色のテーマのファイルを直接渡せる |
+| 0022 | [!2752](https://gitlab.com/kicad/code/kicad/-/merge_requests/2752) | 3D ビューアの不具合 3 件（細い円弧で消えた一時オブジェクトを指したまま、ほか） |
+| 0015 | [!2673](https://gitlab.com/kicad/code/kicad/-/merge_requests/2673) | Altium のシンボル: 複数の実装があるとフットプリントの絞り込みが上書きされる |
+| 0016 | [!2810](https://gitlab.com/kicad/code/kicad/-/merge_requests/2810) | プラグインとコンテンツの管理でデザインブロックを入れられない |
+| 0017 | [!2605](https://gitlab.com/kicad/code/kicad/-/merge_requests/2605) | シートのファイル名に `file://` が付いて誤ってエラーになる |
+| 0018 | master [1c16bd375](https://gitlab.com/kicad/code/kicad/-/commit/1c16bd3753ef686043149428dbd3936ac82e7b7f) | フットプリントの独自の層を、THT のパッドが塞ぐ（[!2630](https://gitlab.com/kicad/code/kicad/-/merge_requests/2630) の代わりに、本家に入った修正を使う） |
+
+見送ったもの: ゾーンの塗りつぶしや保存の順番が本家の KiCad と変わるもの（!2662、!2481）、レビューで問題を指摘されているもの（!2786、!2380、!2377 ほか）、ファイルの形式が変わるもの、大きな新機能。
+
+## 確かめたこと
+
+- `test/regress.sh`（配線の手順 5 つと道具の確認 9 つ）が、画面なし（DISPLAY なし）で全部 OK（Ubuntu 24.04、2026-09-29）。
+- このフォルダのパッチを 10.0.6 に当てた結果が、作業したブランチとまったく同じ中身になる。

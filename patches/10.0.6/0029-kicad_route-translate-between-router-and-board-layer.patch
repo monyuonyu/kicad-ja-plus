@@ -1,0 +1,112 @@
+From cca35f2070ffdc3c94ec0fe4cdd7898d9240e936 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Tue, 29 Sep 2026 09:30:26 +0900
+Subject: [PATCH 29/29] kicad_route: translate between router and board layer
+ numbers (they differ since 9.0)
+
+---
+ qa/tools/pns/kicad_route_main.cpp | 33 ++++++++++++++++++++++---------
+ 1 file changed, 24 insertions(+), 9 deletions(-)
+
+diff --git a/qa/tools/pns/kicad_route_main.cpp b/qa/tools/pns/kicad_route_main.cpp
+index de822e5b..bfe0bbb2 100644
+--- a/qa/tools/pns/kicad_route_main.cpp
++++ b/qa/tools/pns/kicad_route_main.cpp
+@@ -218,7 +218,7 @@ public:
+             PNS::ARC* arc = static_cast<PNS::ARC*>( aItem );
+             PCB_ARC*  a = new PCB_ARC( GetBoard(), static_cast<const SHAPE_ARC*>( arc->Shape( -1 ) ) );
+             a->SetWidth( arc->Width() );
+-            a->SetLayer( ToLAYER_ID( arc->Layers().Start() ) );
++            a->SetLayer( GetBoardLayerFromPNSLayer( arc->Layers().Start() ) );
+             ni = a;
+             break;
+         }
+@@ -229,7 +229,7 @@ public:
+             t->SetStart( seg->Seg().A );
+             t->SetEnd( seg->Seg().B );
+             t->SetWidth( seg->Width() );
+-            t->SetLayer( ToLAYER_ID( seg->Layers().Start() ) );
++            t->SetLayer( GetBoardLayerFromPNSLayer( seg->Layers().Start() ) );
+             ni = t;
+             break;
+         }
+@@ -241,7 +241,8 @@ public:
+             v->SetWidth( via->Diameter( 0 ) );
+             v->SetDrill( via->Drill() );
+             v->SetViaType( via->ViaType() );
+-            v->SetLayerPair( ToLAYER_ID( via->Layers().Start() ), ToLAYER_ID( via->Layers().End() ) );
++            v->SetLayerPair( GetBoardLayerFromPNSLayer( via->Layers().Start() ),
++                             GetBoardLayerFromPNSLayer( via->Layers().End() ) );
+             ni = v;
+             break;
+         }
+@@ -504,7 +505,8 @@ static ROUTE_RESULT runRoute( CTX& c, int aLayer, const ROUTE_PTS& aPts, bool aC
+     }
+ 
+     sizes.ClearLayerPairs();
+-    sizes.AddLayerPair( F_Cu, B_Cu );
++    sizes.AddLayerPair( c.iface->GetPNSLayerFromBoardLayer( F_Cu ),
++                        c.iface->GetPNSLayerFromBoardLayer( B_Cu ) );
+     c.router->UpdateSizes( sizes );
+     c.router->SetMode( PNS::PNS_MODE_ROUTE_SINGLE );
+ 
+@@ -573,10 +575,23 @@ static ROUTE_RESULT runRoute( CTX& c, int aLayer, const ROUTE_PTS& aPts, bool aC
+ }
+ 
+ 
++// A copper layer name ("F.Cu") as the router's layer number (10.0: not the board layer id), -1 if none
++static int pnsLayerByName( CTX& c, const std::string& aName )
++{
++    int layer = c.board->GetLayerID( wxString::FromUTF8( aName ) );
++
++    if( layer < 0 || !IsCopperLayer( layer ) )
++        return -1;
++
++    return c.iface->GetPNSLayerFromBoardLayer( ToLAYER_ID( layer ) );
++}
++
++
+ static bool doAutoroute( CTX& c, const VECTOR2I& aA, const VECTOR2I& aB, bool aAllowShove )
+ {
+     const double viaCostMm = 5.0;
+-    const int    layers[2] = { F_Cu, B_Cu };
++    const int    layers[2] = { c.iface->GetPNSLayerFromBoardLayer( F_Cu ),
++                             c.iface->GetPNSLayerFromBoardLayer( B_Cu ) };
+     PNS::PNS_MODE savedMode = c.settings->Mode();
+     std::vector<PNS::PNS_MODE> modes = { PNS::RM_Walkaround };
+ 
+@@ -656,11 +671,11 @@ static bool doAutoroute( CTX& c, const VECTOR2I& aA, const VECTOR2I& aB, bool aA
+             if( !r.ok )
+                 return false;
+ 
+-            wxString how = wxString::Format( "%s %.1fmm", LSET::Name( ToLAYER_ID( bestLayer ) ), r.lengthMm );
++            wxString how = wxString::Format( "%s %.1fmm", LSET::Name( c.iface->GetBoardLayerFromPNSLayer( bestLayer ) ), r.lengthMm );
+ 
+             if( bestPts.size() == 3 )
+                 how += wxS( "、ビア " ) + fmtPt( bestPts[1].first ) + wxS( " で " )
+-                       + LSET::Name( ToLAYER_ID( bestPts[1].second ) ) + wxS( " へ" );
++                       + LSET::Name( c.iface->GetBoardLayerFromPNSLayer( bestPts[1].second ) ) + wxS( " へ" );
+ 
+             how += wxString::Format( "(%s、%d通り試行)",
+                                      mode == PNS::RM_Shove ? wxS( "押しのけ" ) : wxS( "既存配線は動かさず" ),
+@@ -2071,7 +2086,7 @@ int main( int argc, char** argv )
+         {
+             std::string layerName, tok;
+             is >> layerName;
+-            int       layer = board->GetLayerID( wxString::FromUTF8( layerName ) );
++            int       layer = pnsLayerByName( c, layerName );
+             ROUTE_PTS pts;
+             bool      bad = false;
+ 
+@@ -2079,7 +2094,7 @@ int main( int argc, char** argv )
+             {
+                 if( tok.rfind( "via:", 0 ) == 0 && !pts.empty() )
+                 {
+-                    pts.back().second = board->GetLayerID( wxString::FromUTF8( tok.substr( 4 ) ) );
++                    pts.back().second = pnsLayerByName( c, tok.substr( 4 ) );
+                     continue;
+                 }
+ 
+-- 
+2.43.0
+
