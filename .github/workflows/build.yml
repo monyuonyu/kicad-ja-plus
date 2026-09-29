@@ -33,6 +33,18 @@ jobs:
           sudo apt-get install -y $(cat ${{ matrix.deps }}) kicad ccache \
             python3-numpy python3-matplotlib python3-pil fonts-ipaexfont-gothic xvfb
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Get Freerouting (for kicad-local autoroute)
+        run: |
+          mkdir -p "$HOME/.local/share/kicad-ja-local"
+          curl -fsSL -o "$HOME/.local/share/kicad-ja-local/freerouting.jar" \
+            https://github.com/freerouting/freerouting/releases/download/v2.4.1/freerouting-2.4.1.jar
+          echo "251101c3eeac22d7e7dfcf6796603279e5d1000283eb82d8f093780f7afc6aa9  $HOME/.local/share/kicad-ja-local/freerouting.jar" | sha256sum -c
+
       - name: Prepare the KiCad settings
         run: |
           # KiCad を初めて起動したときと同じく、グローバルのライブラリ表を置く（kicad-cli は自分では作らない）

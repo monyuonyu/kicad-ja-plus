@@ -83,6 +83,18 @@ kicad-python tests/make_keepout.py in.kicad_pcb now/keepout.kicad_pcb >/dev/null
 chk "kicad-local why(キープアウトが塞いでいると見分ける)" "kicad-local why now/keepout.kicad_pcb --json > now/why.json; test \$? -eq 1 && python3 -c \"import json; d=json.load(open('now/why.json')); r=d['diagnosed'][0]; assert r['net']=='Net-(C5-Pad1)' and r['main_cause']==['keepout'], r\""
 chk "kicad-local view(注釈つきの画像。未配線とキープアウトの基板で印が付く)" "kicad-local view now/keepout.kicad_pcb -o now/view.png --drc --ref --net 'Net-(C5-Pad1)' --json > now/view.json && test -s now/view.png && python3 -c \"import json; d=json.load(open('now/view.json')); assert any(m['type']=='unconnected_items' for m in d['marks'])\""
 chk "kicad-local erc --json(要確認があれば終了コード 1)" "kicad-local erc sch/interf_u.kicad_sch --json > now/erc.json; rc=\$?; python3 -c \"import json,sys; d=json.load(open('now/erc.json')); sys.exit(0 if (rc:=int('\$rc'))==(0 if d['ok'] else 1) else 1)\""
+# 全体の自動配線（Freerouting が要る。無ければ飛ばす）: 配線を 1 本消した基板を引き直して未配線 0
+fr_jar=""
+for c in "${FREEROUTING_JAR:-}" ~/.local/share/kicad-ja-local/freerouting.jar ~/.local/share/freerouting/freerouting.jar ~/cad-mcp-lab/tools/freerouting/freerouting-2.4.1.jar; do
+  [ -n "$c" ] && [ -f "$c" ] && { fr_jar=$c; break; }
+done
+if [ -n "$fr_jar" ]; then
+  kicad-python -c "import pcbnew,sys; b=pcbnew.LoadBoard('now/keepout.kicad_pcb'); [b.Remove(z) for z in list(b.Zones()) if z.GetIsRuleArea()]; b.Save('now/unrouted.kicad_pcb')" >/dev/null 2>&1
+  cp in.kicad_pro now/unrouted.kicad_pro
+  chk "kicad-local autoroute(未配線 1 → 0、新しい違反なし)" "kicad-local autoroute now/unrouted.kicad_pcb now/autorouted.kicad_pcb --jar $fr_jar --passes 5 --timeout 300 --json > now/autoroute.json && python3 -c \"import json; d=json.load(open('now/autoroute.json')); assert d['unconnected_before']==1 and d['unconnected_after']==0 and not d['new_violations'], d\""
+else
+  echo "  --  kicad-local autoroute: Freerouting が無いので飛ばした（FREEROUTING_JAR で指定できる）"
+fi
 chk "kicad-local lint(デモ回路図は要確認 0 件)" "kicad-local lint sch/interf_u.kicad_sch | grep -q '要確認'"
 
 # 終了コード: 配線の比較か道具の確認に NG が 1 つでもあれば 1（自動の試験が失敗を見逃さないように）
