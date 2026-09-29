@@ -50,6 +50,21 @@ kicad-local review 新しい版 前の版 --out 確認/        # ERC・DRC・3D�
 終了コード 1 を返します（文章を読み解かなくても、結果で次の判断ができる）。10.0.6 版は画面（DISPLAY）が無くても動きます。
 詳しい使い方は [docs/guide.md](docs/guide.md)、道具は [tools/README.md](tools/README.md)、回路の計算は [tools/ksim/README.md](tools/ksim/README.md)。
 
+## 基板エディタの AI チャット（10.0.6 版）
+
+基板エディタの「表示 → パネル → AI Chat」で、右に AI チャットの枠が出ます。開いている基板について、調べものや修正を頼めます。
+
+- AI は開いている基板を KiCad の IPC API で読み、直します。**基板を変えるコードは、実行する前に毎回、中身を見せて確認します**（確認を省く設定はありません）。
+  実行した変更は「元に戻す」1 回で戻せ、エラーになった回の変更は取り消されます。
+- DRC と画像は、基板の写しを保存して kicad-cli にかけます（開いている基板とファイルは変えません）。
+- 使うのは **ご自身の Anthropic の API キー** です。最初に聞かれ、OS の鍵保管庫（Windows の資格情報マネージャーなど）に保存されます。
+- 初めて開いたとき、専用の Python の環境（Claude Agent SDK と kicad-python）を作るかを聞かれます（Python 3.10 以降が要ります）。
+  手で準備するなら `python3 <KiCad の scripting>/kicad_ai/setup_ai.py`。
+- KiCad の API サーバーが止まっていれば、有効にするかを聞かれます（設定 → プラグイン と同じもの）。
+
+仕組み: 枠（`pcbnew/widgets/panel_ai_chat.cpp`）は会話の表示と承認だけを受け持ち、AI とのやり取りは別プロセスの仲介役
+（`scripting/kicad_ai/bridge.py`）が行います。道具は `get_board`（概要と選択）・`run_python`（kipy のコード。承認つき）・`check`（DRC）・`render`（画像）の 4 つです。
+
 ## 取り込んだ変更
 
 版ごとに、出どころ（本家のコミットや MR）・その版に合わせた調整・確かめたことを書いています。
