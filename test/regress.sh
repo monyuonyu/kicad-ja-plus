@@ -61,6 +61,19 @@ chk "kicad-local review(基板だけでも ERC/DRC/3D のまとめが出る)" "k
 sch_erc_before=$(python3 -c "import sys,pathlib,tempfile; sys.path.insert(0,'$KICAD_LOCAL_HOME/tools'); import review; print(review.erc(pathlib.Path('sch/interf_u.kicad_sch'), pathlib.Path(tempfile.mkdtemp()))[0])" 2>/dev/null)
 chk "kicad-local sch(直列挿入で接続が 1 本増え、ERC は増えない)" "printf 'insert R99 1k Device:R at R4.1\n' | kicad-local sch sch/interf_u.kicad_sch now/sch_out.kicad_sch - > now/sch.log; grep -q '新しいネット \*\*Net-(D1-A)\*\*: D1.2 R99.2' now/sch.log && grep -qF -- \"--- ERC: $sch_erc_before\" now/sch.log"
 chk "基板の寄生インダクタンス(R10.2→C5.1 が 3.32nH)" "kicad-python $KICAD_LOCAL_HOME/tools/ksim/pcbpar.py in.kicad_pcb 'Net-(C5-Pad1)' R10.2 | grep -q 'C5.1 *L   3.32'"
+# 厳しい DRC: R10.1 のネットを外した基板で、ネットの無いパッドと、デモにもともとある細い配線(VCC_PIC 0.35mm)を見つけ、終了コード 1
+python3 - <<'PY'
+import sys; sys.path.insert(0, "../tools"); import sx
+b = sx.parse(open("in.kicad_pcb").read())
+for fp in sx.find(b, "footprint"):
+    if str(sx.prop(fp, "Reference")[2]) == "R10":
+        for p in sx.find(fp, "pad"):
+            if str(p[1]) == "1":
+                p[:] = [e for e in p if not (isinstance(e, list) and e and e[0] == "net")]
+open("now/netless.kicad_pcb", "w").write(sx.dump(b) + "\n")
+PY
+cp in.kicad_pro now/netless.kicad_pro
+chk "kicad-local drc --strict(ネットの無いパッドと、ネットクラスより細い配線を見つける)" "kicad-local drc now/netless.kicad_pcb --strict --json > now/strict.json; test \$? -eq 1 && python3 -c \"import json; d=json.load(open('now/strict.json')); k={(s['kind'], s.get('ref',''), s.get('pad',''), s.get('net','')) for s in d['strict']}; assert ('netless_pad','R10','1','') in k; assert any(x[0]=='narrow_track' and x[3]=='/pic_sockets/VCC_PIC' for x in k)\""
 chk "kicad-local lint(デモ回路図は要確認 0 件)" "kicad-local lint sch/interf_u.kicad_sch | grep -q '要確認'"
 
 # 終了コード: 配線の比較か道具の確認に NG が 1 つでもあれば 1（自動の試験が失敗を見逃さないように）

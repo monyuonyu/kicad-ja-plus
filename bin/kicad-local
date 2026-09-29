@@ -15,8 +15,11 @@ cat <<'HELP'
 kicad-local: 修正版 KiCad 8.0.9 の道具をまとめた入口(保存形式は KiCad 8。KiCad 8 で開ける)
 
 よく使う:
-  kicad-local drc <基板.kicad_pcb> [--refill]   DRC を回して要点(種類ごとの件数と位置)を表示
+  kicad-local drc <基板.kicad_pcb> [--refill] [--strict] [--json]
+                                                DRC を回して要点(種類ごとの件数と位置)を表示。要確認があれば終了コード 1
                                                 --refill でベタを塗り直してから(基板は変えない)
+                                                --strict で DRC が見逃す 3 つ(ネットの無いパッド・ネットクラスより
+                                                細い配線・古いベタ)も調べる。--json で機械が読む形
   kicad-local erc <回路図.kicad_sch>           ERC を回して要点を表示
   kicad-local lint <回路図.kicad_sch>          設計の定石からの外れを点検(外部の線の保護・ベース抵抗・
                                                 TVS/電解の向き・電源の入出力コンデンサ・つなぎ忘れ)
@@ -101,11 +104,7 @@ case "$cmd" in
   cli) exec kicad-cli-local "$@" ;;
   python) exec kicad-python "$@" ;;
   route) exec kicad-route "$@" ;;
-  drc)
-    b=$1; shift; extra=""; [ "$1" = "--refill" ] && extra="--refill-zones"
-    [ -f "$b" ] || { echo "基板がない: $b"; exit 2; }
-    t=$(mktemp -d); kicad-cli-local pcb drc --schematic-parity --format json $extra -o "$t/drc.json" "$b" >/dev/null 2>&1
-    [ -f "$t/drc.json" ] && summarize "$t/drc.json"; rm -rf "$t" ;;
+  drc) exec python3 "$KICAD_LOCAL_HOME/tools/kdrc.py" "$@" ;;
   erc)
     s=$1; [ -f "$s" ] || { echo "回路図がない: $s"; exit 2; }
     t=$(mktemp -d); kicad-cli-local sch erc --format json -o "$t/erc.json" "$s" >/dev/null 2>&1
