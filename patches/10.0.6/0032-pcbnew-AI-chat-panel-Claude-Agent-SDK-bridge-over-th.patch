@@ -1,4 +1,4 @@
-From 50a09d5bb635e95f75e94eee2bd175ecbff5bf2c Mon Sep 17 00:00:00 2001
+From c51affea7aad384bee22c1d4096602a4b6e6b7f6 Mon Sep 17 00:00:00 2001
 From: shota <monyuonyu@gmail.com>
 Date: Tue, 29 Sep 2026 16:22:50 +0900
 Subject: [PATCH] pcbnew: AI chat panel (Claude Agent SDK bridge over the IPC
@@ -298,7 +298,7 @@ index cbd76ca7..000dcad6 100644
  
 diff --git a/pcbnew/widgets/panel_ai_chat.cpp b/pcbnew/widgets/panel_ai_chat.cpp
 new file mode 100644
-index 00000000..98813712
+index 00000000..0bbeb11d
 --- /dev/null
 +++ b/pcbnew/widgets/panel_ai_chat.cpp
 @@ -0,0 +1,895 @@
@@ -539,7 +539,7 @@ index 00000000..98813712
 +    case ROLE::INFO:
 +        attr.SetTextColour( wxColour( 0x40, 0x80, 0x40 ) );
 +        break;
-+    case ROLE::ERROR:
++    case ROLE::FAIL:
 +        attr.SetTextColour( wxColour( 0xc0, 0x30, 0x30 ) );
 +        break;
 +    }
@@ -636,7 +636,7 @@ index 00000000..98813712
 +bool PANEL_AI_CHAT::checkPrerequisites()
 +{
 +#ifndef KICAD_IPC_API
-+    append( ROLE::ERROR, J( "この KiCad は IPC API なしでビルドされているので、AI チャットは使えません。" ) );
++    append( ROLE::FAIL, J( "この KiCad は IPC API なしでビルドされているので、AI チャットは使えません。" ) );
 +    return false;
 +#else
 +    if( !Pgm().GetApiServer().Running() )
@@ -648,7 +648,7 @@ index 00000000..98813712
 +
 +        if( answer != wxYES )
 +        {
-+            append( ROLE::ERROR, J( "API サーバーが止まっているので、AI は基板に触れません。" ) );
++            append( ROLE::FAIL, J( "API サーバーが止まっているので、AI は基板に触れません。" ) );
 +            return false;
 +        }
 +
@@ -659,14 +659,14 @@ index 00000000..98813712
 +
 +        if( !Pgm().GetApiServer().Running() )
 +        {
-+            append( ROLE::ERROR, J( "API サーバーを起動できませんでした。" ) );
++            append( ROLE::FAIL, J( "API サーバーを起動できませんでした。" ) );
 +            return false;
 +        }
 +    }
 +
 +    if( !wxFileName::FileExists( bridgePath() ) )
 +    {
-+        append( ROLE::ERROR, wxString::Format( J( "AI の仲介役が見つかりません: %s" ), bridgePath() ) );
++        append( ROLE::FAIL, wxString::Format( J( "AI の仲介役が見つかりません: %s" ), bridgePath() ) );
 +        return false;
 +    }
 +
@@ -683,7 +683,7 @@ index 00000000..98813712
 +        if( answer == wxYES )
 +            runSetup();
 +        else
-+            append( ROLE::ERROR, wxString::Format( J( "準備するには、次を実行してください:\n"
++            append( ROLE::FAIL, wxString::Format( J( "準備するには、次を実行してください:\n"
 +                                                      "python3 \"%s\"" ),
 +                                                   wxFileName( bridgePath() ).GetPathWithSep()
 +                                                           + wxS( "setup_ai.py" ) ) );
@@ -762,7 +762,7 @@ index 00000000..98813712
 +
 +    if( py.IsEmpty() )
 +    {
-+        append( ROLE::ERROR, J( "Python 3.10 以降が見つかりません。python.org から入れてから、"
++        append( ROLE::FAIL, J( "Python 3.10 以降が見つかりません。python.org から入れてから、"
 +                                "もう一度この枠を開いてください。" ) );
 +        return;
 +    }
@@ -789,7 +789,7 @@ index 00000000..98813712
 +        delete m_setupProcess;
 +        m_setupProcess = nullptr;
 +        m_sendButton->Enable( true );
-+        append( ROLE::ERROR, wxString::Format( J( "準備を始められませんでした（%s）。" ), cmd ) );
++        append( ROLE::FAIL, wxString::Format( J( "準備を始められませんでした（%s）。" ), cmd ) );
 +        return;
 +    }
 +
@@ -811,7 +811,7 @@ index 00000000..98813712
 +
 +    if( aEvent.GetExitCode() != 0 || !wxFileName::FileExists( pythonPath() ) )
 +    {
-+        append( ROLE::ERROR, wxString::Format( J( "準備に失敗しました（終了コード %d）。上の出力を見てください。" ),
++        append( ROLE::FAIL, wxString::Format( J( "準備に失敗しました（終了コード %d）。上の出力を見てください。" ),
 +                                               aEvent.GetExitCode() ) );
 +        return;
 +    }
@@ -857,7 +857,7 @@ index 00000000..98813712
 +
 +    if( m_pid <= 0 )
 +    {
-+        append( ROLE::ERROR, wxString::Format( J( "AI の仲介役を起動できませんでした: %s" ), cmd ) );
++        append( ROLE::FAIL, wxString::Format( J( "AI の仲介役を起動できませんでした: %s" ), cmd ) );
 +        delete m_process;
 +        m_process = nullptr;
 +        return;
@@ -1024,11 +1024,11 @@ index 00000000..98813712
 +        setBusy( false );
 +
 +        if( msg.contains( "error" ) && msg["error"].is_string() )
-+            append( ROLE::ERROR, wxString::Format( J( "エラー: %s" ), str( "error" ) ) );
++            append( ROLE::FAIL, wxString::Format( J( "エラー: %s" ), str( "error" ) ) );
 +    }
 +    else if( type == "bad_key" )
 +    {
-+        append( ROLE::ERROR, J( "API キーが正しくありません。入れ直してください。" ) );
++        append( ROLE::FAIL, J( "API キーが正しくありません。入れ直してください。" ) );
 +        setBusy( false );
 +        stopBridge();
 +        askApiKey();
@@ -1040,7 +1040,7 @@ index 00000000..98813712
 +    }
 +    else if( type == "fatal" )
 +    {
-+        append( ROLE::ERROR, str( "text" ) );
++        append( ROLE::FAIL, str( "text" ) );
 +        setBusy( false );
 +    }
 +}
@@ -1074,7 +1074,7 @@ index 00000000..98813712
 +
 +    if( dlg.ShowModal() != wxID_OK || dlg.GetValue().Trim().Trim( false ).IsEmpty() )
 +    {
-+        append( ROLE::ERROR, J( "API キーが無いので、AI を使えません。" ) );
++        append( ROLE::FAIL, J( "API キーが無いので、AI を使えません。" ) );
 +        return;
 +    }
 +
@@ -1094,7 +1094,7 @@ index 00000000..98813712
 +
 +    if( code != 0 )
 +    {
-+        append( ROLE::ERROR, wxString::Format( J( "API キーを保存できませんでした。\n%s" ),
++        append( ROLE::FAIL, wxString::Format( J( "API キーを保存できませんでした。\n%s" ),
 +                                               wxJoin( err, '\n', '\0' ) ) );
 +        return;
 +    }
@@ -1194,12 +1194,12 @@ index 00000000..98813712
 +        if( err.length() > 1500 )
 +            err = wxS( "…" ) + err.Right( 1500 );
 +
-+        append( ROLE::ERROR, wxString::Format( J( "AI の仲介役が終了しました（%d）。\n%s" ), code, err ) );
++        append( ROLE::FAIL, wxString::Format( J( "AI の仲介役が終了しました（%d）。\n%s" ), code, err ) );
 +    }
 +}
 diff --git a/pcbnew/widgets/panel_ai_chat.h b/pcbnew/widgets/panel_ai_chat.h
 new file mode 100644
-index 00000000..7ccd306c
+index 00000000..33b51eeb
 --- /dev/null
 +++ b/pcbnew/widgets/panel_ai_chat.h
 @@ -0,0 +1,100 @@
@@ -1253,7 +1253,7 @@ index 00000000..7ccd306c
 +    void OnShowPanel();
 +
 +private:
-+    enum class ROLE { USER, AI, TOOL, INFO, ERROR };
++    enum class ROLE { USER, AI, TOOL, INFO, FAIL };  // ERROR は Windows のヘッダーで数の 0 に置き換わるので使わない
 +
 +    void append( ROLE aRole, const wxString& aText );
 +    void appendMarkdown( const wxString& aText );
