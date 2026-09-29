@@ -1,8 +1,9 @@
 #!/bin/bash
-# SWIG の所有権バグを直してビルドした KiCad 8.0.9 の pcbnew モジュールで Python を動かす
-# (修正: ~/src/kicad-8.0.9/tools/build/fix_swig_ownership_refcount.py)
+# 改良した KiCad の pcbnew モジュールで Python を動かす(SWIG の所有権の不具合も直してある)
 # このリポジトリの場所(道具と試験を探す)と、修正版 KiCad をビルドした場所
 KICAD_LOCAL_HOME=${KICAD_LOCAL_HOME:-$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)}
+# 配布版は同梱の build/、ソースから作ったときは ~/src/build-10.0.6
+[ -z "$KICAD_LOCAL_BUILD" ] && [ -d "$KICAD_LOCAL_HOME/build" ] && KICAD_LOCAL_BUILD=$KICAD_LOCAL_HOME/build
 KICAD_LOCAL_BUILD=${KICAD_LOCAL_BUILD:-$HOME/src/build-10.0.6}
 export KICAD_LOCAL_HOME KICAD_LOCAL_BUILD
 PYTHONPATH="$KICAD_LOCAL_BUILD/pcbnew${PYTHONPATH:+:$PYTHONPATH}" exec python3 "$@"

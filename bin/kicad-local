@@ -1,8 +1,10 @@
 #!/bin/bash
-# kicad-local: 修正版 KiCad 8.0.9(ローカルビルド)の入口。ファイル形式は KiCad 8 のまま。
+# kicad-local: 改良した KiCad(10.0.6 か 8.0.9 をビルドしたもの)の入口。ファイル形式は元の版のまま。
 # 変更一覧: patches/README.md
 # このリポジトリの場所(道具と試験を探す)と、修正版 KiCad をビルドした場所
 KICAD_LOCAL_HOME=${KICAD_LOCAL_HOME:-$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)}
+# 配布版は同梱の build/、ソースから作ったときは ~/src/build-10.0.6
+[ -z "$KICAD_LOCAL_BUILD" ] && [ -d "$KICAD_LOCAL_HOME/build" ] && KICAD_LOCAL_BUILD=$KICAD_LOCAL_HOME/build
 KICAD_LOCAL_BUILD=${KICAD_LOCAL_BUILD:-$HOME/src/build-10.0.6}
 export KICAD_LOCAL_HOME KICAD_LOCAL_BUILD
 export PATH="$KICAD_LOCAL_HOME/bin:$PATH"   # ほかの入口(kicad-python など)を名前で呼ぶ
@@ -12,7 +14,7 @@ PATCHES=$KICAD_LOCAL_HOME/patches
 
 usage() {
 cat <<'HELP'
-kicad-local: 修正版 KiCad 8.0.9 の道具をまとめた入口(保存形式は KiCad 8。KiCad 8 で開ける)
+kicad-local: 改良した KiCad の道具をまとめた入口(保存形式は元の版のまま。本家の同じ版で開ける)
 
 よく使う:
   kicad-local drc <基板.kicad_pcb> [--refill] [--strict] [--json]

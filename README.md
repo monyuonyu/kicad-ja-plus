@@ -59,9 +59,32 @@ kicad-local review 新しい版 前の版 --out 確認/        # ERC・DRC・3D�
 
 ファイルの形式を変える機能は入れていません。
 
+## 入れ方（Linux、ビルド済み）
+
+Ubuntu 24.04（x86_64）向けの tar.gz を、リリースに置いています。
+
+1. 本家の KiCad 10 を PPA から入れる。部品ライブラリと、wxWidgets・OpenCASCADE などの共通の部品は、これを使います。
+
+   ```
+   sudo add-apt-repository ppa:kicad/kicad-10.0-releases
+   sudo apt install kicad python3-numpy python3-matplotlib python3-pil
+   ```
+
+2. 好きな場所に展開して、`bin/` を PATH に入れる
+
+   ```
+   tar xzf kicad-ja-local-10.0.6-linux-x86_64.tar.gz
+   export PATH="$PWD/kicad-ja-local-10.0.6-linux-x86_64/bin:$PATH"
+   kicad-local help
+   kicad-local test        # 回帰試験。全部 OK なら入れ方は正しい
+   ```
+
+全体の自動配線（`kicad-local autoroute`）を使うときだけ、Java 21 以降と
+[Freerouting](https://github.com/freerouting/freerouting/releases) の jar が要ります（jar の場所は `--jar` か `FREEROUTING_JAR`）。
+
 ## 作り方（Linux）
 
-1. ビルドに要るパッケージを入れる（Ubuntu/Debian。一覧は [patches/notes/builddeps.txt](patches/notes/builddeps.txt)）
+1. ビルドに要るパッケージを入れる（Ubuntu/Debian。一覧は [patches/10.0.6/builddeps.txt](patches/10.0.6/builddeps.txt)）
 
    ```
    sudo apt install $(cat patches/10.0.6/builddeps.txt)     # 8.0.9 なら patches/8.0.9/notes/builddeps.txt
@@ -95,7 +118,7 @@ kicad-local review 新しい版 前の版 --out 確認/        # ERC・DRC・3D�
 
    ビルドした場所は `KICAD_LOCAL_BUILD` で指定します（既定は `~/src/build-10.0.6`。8.0.9 なら `export KICAD_LOCAL_BUILD=~/src/build-8.0.9`）。
    ソースの場所を変えたときは `KICAD_LOCAL_SRC` を設定します。
-   部品ライブラリ（フットプリント・シンボル・3D モデル）は、システムに入れた KiCad 8 のもの（`/usr/share/kicad`）を使います。
+   部品ライブラリ（フットプリント・シンボル・3D モデル）は、システムに入れた本家の KiCad（同じ系列）のもの（`/usr/share/kicad`）を使います。
 
 ## 試験
 
@@ -115,6 +138,8 @@ KiCad 8.0.9 に付いてくるデモの基板（pic_programmer）と回路図（
 | `bin/` | 入口（`kicad-local`、`kicad-route`、`kicad-gerber`、`kicad-cli-local`、`kicad-python`） |
 | `tools/` | Python の道具（review・lint・sch・sim・pcbsync・silkfix ほか） |
 | `test/` | 回帰試験 |
+| `package/` | 配布物を作るスクリプト（`linux.sh`：ビルドした場所から tar.gz を作る） |
+| `installer/` | Windows のインストーラー（NSIS） |
 | `docs/guide.md` | 手引き（使い方の流れ、最新版から機能を取り込むやり方、ハマりどころ） |
 
 ## ライセンス

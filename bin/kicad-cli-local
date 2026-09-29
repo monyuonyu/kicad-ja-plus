@@ -1,9 +1,11 @@
 #!/bin/bash
-# 修正版 KiCad 8.0.9 の kicad-cli(ビルドした場所から実行)。ライブラリはシステムの KiCad 8 のものを使う。
+# 改良した KiCad の kicad-cli(ビルドした場所から実行)。部品ライブラリはシステムの KiCad のものを使う。
 # 追加機能: pcb drc --refill-zones / --save-board、DRC の JSON に位置と層、ルーター修正、SWIG 修正
 # 変更一覧: patches/
 # このリポジトリの場所(道具と試験を探す)と、修正版 KiCad をビルドした場所
 KICAD_LOCAL_HOME=${KICAD_LOCAL_HOME:-$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)}
+# 配布版は同梱の build/、ソースから作ったときは ~/src/build-10.0.6
+[ -z "$KICAD_LOCAL_BUILD" ] && [ -d "$KICAD_LOCAL_HOME/build" ] && KICAD_LOCAL_BUILD=$KICAD_LOCAL_HOME/build
 KICAD_LOCAL_BUILD=${KICAD_LOCAL_BUILD:-$HOME/src/build-10.0.6}
 export KICAD_LOCAL_HOME KICAD_LOCAL_BUILD
 export KICAD_RUN_FROM_BUILD_DIR=1
