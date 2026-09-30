@@ -1,0 +1,202 @@
+From aafd284b4eba990d9e9ca213e7bc9fc93e4a3050 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Wed, 30 Sep 2026 17:10:03 +0900
+Subject: [PATCH] AI chat (8.0.9): project settings (rules, net classes) are
+ compared and restored on errors; the DRC copy gets the unsaved project
+ settings; tell when the turn limit is hit (raised to 80); iso render zoomed
+ out; keep the trim note
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../scripting/pcbnew_action_plugins.cpp       | 70 ++++++++++++++++++-
+ scripting/kicad_ai/bridge.py                  | 26 ++++---
+ 2 files changed, 86 insertions(+), 10 deletions(-)
+
+diff --git a/pcbnew/python/scripting/pcbnew_action_plugins.cpp b/pcbnew/python/scripting/pcbnew_action_plugins.cpp
+index 7d5d79b..b4b4f0c 100644
+--- a/pcbnew/python/scripting/pcbnew_action_plugins.cpp
++++ b/pcbnew/python/scripting/pcbnew_action_plugins.cpp
+@@ -47,6 +47,10 @@
+ #include <richio.h>
+ #include <locale_io.h>
+ #include <tool/actions.h>
++#include <project.h>
++#include <project/project_file.h>
++#include <project/net_settings.h>
++#include <settings/json_settings_internals.h>
+ 
+ PYTHON_ACTION_PLUGIN::PYTHON_ACTION_PLUGIN( PyObject* aAction )
+ {
+@@ -679,6 +683,44 @@ static std::string formatBoardForCompare( BOARD* aBoard )
+ }
+ 
+ 
++/// プロジェクトの設定（設計のルール・ネットクラスなど。.kicad_pro の中身）を文字にする
++static std::string formatProjectSettings( PROJECT& aProject )
++{
++    try
++    {
++        return aProject.GetProjectFile().FormatAsString();
++    }
++    catch( ... )
++    {
++        return std::string();
++    }
++}
++
++
++/// プロジェクトの設定を、formatProjectSettings で取った物に戻す（誤りの時の取り消し）
++static void restoreProjectSettings( PROJECT& aProject, BOARD* aBoard, const std::string& aJson )
++{
++    if( aJson.empty() )
++        return;
++
++    try
++    {
++        PROJECT_FILE& file = aProject.GetProjectFile();
++        *static_cast<nlohmann::json*>( file.Internals() ) = nlohmann::json::parse( aJson );
++        file.Load();
++        aBoard->GetDesignSettings().LoadFromFile();
++
++        if( file.NetSettings() )
++            file.NetSettings()->LoadFromFile();
++
++        aBoard->SynchronizeNetsAndNetClasses( true );
++    }
++    catch( ... )
++    {
++    }
++}
++
++
+ static bool runAiCode( const std::string& aCode, wxString& aOutput )
+ {
+     PyLOCK lock;
+@@ -754,6 +796,8 @@ wxString PCB_EDIT_FRAME::RunAiPython( const std::string& aCode, bool aWrite, con
+     itemsList.ClearItemsList();
+ 
+     const std::string before = formatBoardForCompare( pcb );
++    // 設計のルール・ネットクラスなどは基板のファイルでなくプロジェクトの側にあるので、別に控える
++    const std::string settingsBefore = formatProjectSettings( Prj() );
+     BOARD_COMMIT      commit( this );
+ 
+     ACTION_PLUGINS::SetActionRunning( true );
+@@ -804,13 +848,31 @@ wxString PCB_EDIT_FRAME::RunAiPython( const std::string& aCode, bool aWrite, con
+         addNew( zone );
+ 
+     const bool changed = addedOrDeleted > 0 || formatBoardForCompare( pcb ) != before;
++    const bool settingsChanged = formatProjectSettings( Prj() ) != settingsBefore;
++
++    if( !aOk && settingsChanged )
++    {
++        // 誤りの時は、設計の設定も前に戻す
++        restoreProjectSettings( Prj(), pcb, settingsBefore );
++        output += wxString::FromUTF8( "（エラーのため、設計の設定の変更も取り消した）\n" );
++    }
++
++    const wxString settingsNote = wxString::FromUTF8(
++            "（設計の設定（ルール・ネットクラスなど）を変えた。これは「元に戻す」では戻らない"
++            "（KiCad の「基板の設定」と同じ）。基板を保存すると、プロジェクトのファイルに書かれる）\n" );
++
++    if( aOk && settingsChanged )
++        OnModify();
+ 
+     if( !changed )
+     {
+-        // 変えなかった回は、空の「元に戻す」の段を作らない
++        // 基板を変えなかった回は、空の「元に戻す」の段を作らない
+         ClearListAndDeleteItems( oldBuffer );
+         delete oldBuffer;
+-        output += wxString::FromUTF8( aOk ? "（基板は変えていない）\n" : "" );
++
++        if( aOk )
++            output += settingsChanged ? settingsNote : wxString::FromUTF8( "（基板は変えていない）\n" );
++
+         return output;
+     }
+ 
+@@ -830,5 +892,9 @@ wxString PCB_EDIT_FRAME::RunAiPython( const std::string& aCode, bool aWrite, con
+ 
+     output += wxString::FromUTF8( "（変更を基板へ反映した。「元に戻す」1 回で戻せる: " )
+               + aDescription + wxS( "）\n" );
++
++    if( settingsChanged )
++        output += settingsNote;
++
+     return output;
+ }
+diff --git a/scripting/kicad_ai/bridge.py b/scripting/kicad_ai/bridge.py
+index cd1a0ef..3fa7c63 100644
+--- a/scripting/kicad_ai/bridge.py
++++ b/scripting/kicad_ai/bridge.py
+@@ -182,11 +182,12 @@ import os, shutil
+ dst = %r
+ ok = pcbnew.SaveBoard(dst, board, True)
+ src = board.GetFileName()
+-if ok and src:
+-    base, dbase = os.path.splitext(src)[0], os.path.splitext(dst)[0]
+-    for ext in (".kicad_pro", ".kicad_dru"):
+-        if os.path.exists(base + ext):
+-            shutil.copyfile(base + ext, dbase + ext)
++if ok:
++    dbase = os.path.splitext(dst)[0]
++    # プロジェクトの設定（ルール・ネットクラスなど）は、保存していない今の値を書き出す（開いているプロジェクトの場所は変えない）
++    pcbnew.GetSettingsManager().SaveProjectCopy(dbase + ".kicad_pro")
++    if src and os.path.exists(os.path.splitext(src)[0] + ".kicad_dru"):
++        shutil.copyfile(os.path.splitext(src)[0] + ".kicad_dru", dbase + ".kicad_dru")
+ print("SAVED" if ok else "FAILED")
+ """
+ 
+@@ -195,6 +196,9 @@ def kicad_cli():
+     return os.environ.get("KICAD_AI_CLI") or "kicad-cli"
+ 
+ 
++# 1 回の依頼で、AI が道具を呼んで考えを進められる回数の上限
++MAX_TURNS = 80
++
+ class Bridge:
+     def __init__(self, args):
+         self.args = args
+@@ -252,7 +256,8 @@ class Bridge:
+         self.send(type="tool", text=f"実行しています: {desc}")
+         # 承認した番号のまま頼む（KiCad は承認した番号の実行だけを受け付ける）
+         ok, out = await self.py(code, write=True, description=desc, id_=n)
+-        return text(out.strip()[-20000:] or "(出力なし)", not ok)
++        # KiCad の側で 20,000 文字に切り詰め、その印を先頭に付けている。印ごと渡す
++        return text(out.strip()[-30000:] or "(出力なし)", not ok)
+ 
+     async def t_check(self, args):
+         self.send(type="tool", text="DRC をかけています")
+@@ -292,7 +297,8 @@ class Bridge:
+         png = path + f".{side}.png"
+         cmd = [kicad_cli(), "pcb", "render", "-o", png, "-w", "1200", "-h", "900", "--quality", "basic"]
+         if side == "iso":
+-            cmd += ["--side", "top", "--rotate", "-45,0,45", "--perspective"]
++            # 斜めは端が切れやすいので、少し引いて撮る
++            cmd += ["--side", "top", "--rotate", "-45,0,45", "--perspective", "--zoom", "0.8"]
+         else:
+             cmd += ["--side", side]
+         p = await asyncio.to_thread(subprocess.run, cmd + [path], capture_output=True, text=True, env=cli_env())
+@@ -327,7 +333,7 @@ class Bridge:
+             model=self.args.model, system_prompt=SYSTEM,
+             cli_path=self.args.claude or None,
+             tools=[], allowed_tools=["mcp__kicad__*"], mcp_servers={"kicad": self.make_server()},
+-            strict_mcp_config=True, setting_sources=[], cwd=self.args.workdir, max_turns=40, env=env)
++            strict_mcp_config=True, setting_sources=[], cwd=self.args.workdir, max_turns=MAX_TURNS, env=env)
+ 
+     # --- KiCad とのやり取り ---
+ 
+@@ -384,6 +390,10 @@ class Bridge:
+                         if isinstance(b, TextBlock) and b.text.strip():
+                             said.append(b.text)
+                             self.send(type="text", text=b.text)
++                elif isinstance(m, ResultMessage) and m.subtype == "error_max_turns":
++                    # やり取りの回数の上限。黙って止まったように見えないように知らせる
++                    error = ("やり取りの回数の上限（%d 回）に達したので、途中で止めた。続けるには「続けて」と送る"
++                             % MAX_TURNS)
+                 elif isinstance(m, ResultMessage) and m.is_error:
+                     # subtype は "success" のこともあるので、中身のある説明を選ぶ
+                     error = (getattr(m, "result", None) or "").strip() or \
+-- 
+2.43.0
+

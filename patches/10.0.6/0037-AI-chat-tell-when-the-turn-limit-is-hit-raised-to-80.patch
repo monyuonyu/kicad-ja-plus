@@ -1,0 +1,58 @@
+From 6bc39f3c86bf3055d16f98db30f011f8b615f17f Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Wed, 30 Sep 2026 17:10:03 +0900
+Subject: [PATCH] AI chat: tell when the turn limit is hit (raised to 80); iso
+ render zoomed out
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ scripting/kicad_ai/bridge.py | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/scripting/kicad_ai/bridge.py b/scripting/kicad_ai/bridge.py
+index 22146f66..5c4fccab 100644
+--- a/scripting/kicad_ai/bridge.py
++++ b/scripting/kicad_ai/bridge.py
+@@ -190,6 +190,9 @@ class Board:
+             return "kicad-cli"
+ 
+ 
++# 1 回の依頼で、AI が道具を呼んで考えを進められる回数の上限
++MAX_TURNS = 80
++
+ class Bridge:
+     def __init__(self, args):
+         self.args = args
+@@ -276,7 +279,8 @@ class Bridge:
+         png = path + f".{side}.png"
+         cmd = [b.cli(), "pcb", "render", "-o", png, "-w", "1200", "-h", "900", "--quality", "basic"]
+         if side == "iso":
+-            cmd += ["--side", "top", "--rotate", "-45,0,45", "--perspective"]
++            # 斜めは端が切れやすいので、少し引いて撮る
++            cmd += ["--side", "top", "--rotate", "-45,0,45", "--perspective", "--zoom", "0.8"]
+         else:
+             cmd += ["--side", side]
+         p = await asyncio.to_thread(subprocess.run, cmd + [path], capture_output=True, text=True, env=cli_env())
+@@ -311,7 +315,7 @@ class Bridge:
+             model=self.args.model, system_prompt=SYSTEM,
+             cli_path=self.args.claude or None,
+             tools=[], allowed_tools=["mcp__kicad__*"], mcp_servers={"kicad": self.make_server()},
+-            strict_mcp_config=True, setting_sources=[], cwd=self.args.workdir, max_turns=40, env=env)
++            strict_mcp_config=True, setting_sources=[], cwd=self.args.workdir, max_turns=MAX_TURNS, env=env)
+ 
+     # --- KiCad とのやり取り ---
+ 
+@@ -363,6 +367,10 @@ class Bridge:
+                         if isinstance(b, TextBlock) and b.text.strip():
+                             said.append(b.text)
+                             self.send(type="text", text=b.text)
++                elif isinstance(m, ResultMessage) and m.subtype == "error_max_turns":
++                    # やり取りの回数の上限。黙って止まったように見えないように知らせる
++                    error = ("やり取りの回数の上限（%d 回）に達したので、途中で止めた。続けるには「続けて」と送る"
++                             % MAX_TURNS)
+                 elif isinstance(m, ResultMessage) and m.is_error:
+                     # subtype は "success" のこともあるので、中身のある説明を選ぶ
+                     error = (getattr(m, "result", None) or "").strip() or \
+-- 
+2.43.0
+
