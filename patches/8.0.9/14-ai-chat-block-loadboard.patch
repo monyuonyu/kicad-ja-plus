@@ -1,23 +1,24 @@
-From 995fc439b5d597ef2f8e631016bd41ca2bf70aa5 Mon Sep 17 00:00:00 2001
+From 34bac2d5e21009210d1c0f8a233016a9a8f3b0eb Mon Sep 17 00:00:00 2001
 From: shota <monyuonyu@gmail.com>
 Date: Wed, 30 Sep 2026 15:55:17 +0900
-Subject: [PATCH] AI chat (8.0.9): block LoadBoard/NewBoard and save boards
- without settings while the AI's code runs
+Subject: [PATCH] AI chat (8.0.9): block LoadBoard/NewBoard, and saving over
+ the open board, while the AI's code runs
 
 pcbnew.LoadBoard in the GUI loads another project into the settings manager and changes global settings, and pcbnew
-crashed afterwards (BOARD::GetVisibleElements). SaveBoard with settings moves the open project to the copy.
+crashed afterwards (BOARD::GetVisibleElements). SaveBoard with settings moves the open project to the copy, and saving
+over the open board's file cannot be undone; the user saves with Ctrl+S.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- .../python/scripting/pcbnew_action_plugins.cpp | 18 ++++++++++++++++++
- scripting/kicad_ai/bridge.py                   |  5 ++++-
- 2 files changed, 22 insertions(+), 1 deletion(-)
+ .../scripting/pcbnew_action_plugins.cpp       | 24 +++++++++++++++++++
+ scripting/kicad_ai/bridge.py                  |  5 +++-
+ 2 files changed, 28 insertions(+), 1 deletion(-)
 
 diff --git a/pcbnew/python/scripting/pcbnew_action_plugins.cpp b/pcbnew/python/scripting/pcbnew_action_plugins.cpp
-index 989742f..ca09b0f 100644
+index 989742f..5f1925a 100644
 --- a/pcbnew/python/scripting/pcbnew_action_plugins.cpp
 +++ b/pcbnew/python/scripting/pcbnew_action_plugins.cpp
-@@ -593,6 +593,22 @@ def _kicad_ai_run(code):
+@@ -593,6 +593,28 @@ def _kicad_ai_run(code):
      saved = (sys.stdout, sys.stderr)
      sys.stdout = sys.stderr = out
      ok = True
@@ -32,6 +33,12 @@ index 989742f..ca09b0f 100644
 +        return f
 +
 +    def _save_board(filename, brd, skip_settings=True):
++        # 開いている基板のファイルは上書きさせない（「元に戻す」で戻らない。保存は利用者が Ctrl+S で）
++        import os
++        open_file = pcbnew.GetBoard().GetFileName() if pcbnew.GetBoard() else ""
++        if open_file and os.path.abspath(str(filename)) == os.path.abspath(open_file):
++            raise RuntimeError("開いている基板のファイルは上書きしない（「元に戻す」で戻らない）。"
++                               "保存が要るなら、利用者に Ctrl+S で保存してもらう")
 +        # 設定も保存すると、開いているプロジェクトの場所が写し先に変わるので、基板だけを保存する
 +        return real["SaveBoard"](filename, brd, True)
 +    pcbnew.LoadBoard = _blocked("LoadBoard")
@@ -40,7 +47,7 @@ index 989742f..ca09b0f 100644
      try:
          board = pcbnew.GetBoard()
          env = {"__name__": "__kicad_ai__", "pcbnew": pcbnew, "board": board,
-@@ -612,6 +628,8 @@ def _kicad_ai_run(code):
+@@ -612,6 +634,8 @@ def _kicad_ai_run(code):
          traceback.print_exc()
      finally:
          sys.stdout, sys.stderr = saved
@@ -50,7 +57,7 @@ index 989742f..ca09b0f 100644
  )PY";
  
 diff --git a/scripting/kicad_ai/bridge.py b/scripting/kicad_ai/bridge.py
-index 585d2aa..7f92dcf 100644
+index 585d2aa..4d9ce08 100644
 --- a/scripting/kicad_ai/bridge.py
 +++ b/scripting/kicad_ai/bridge.py
 @@ -93,7 +93,10 @@ SYSTEM = """あなたは KiCad の基板エディタに組み込まれた設計
@@ -60,7 +67,7 @@ index 585d2aa..7f92dcf 100644
 -  最後の式の値が返る。変えたものは実行の中ですぐ読み直せる
 +  最後の式の値が返る。変えたものは実行の中ですぐ読み直せる。
 +  pcbnew.LoadBoard・NewBoard は使えない（開いている基板の設定が壊れて落ちる）。別の基板を調べるには kicad-cli を使う。
-+  pcbnew.SaveBoard は基板だけを保存する（開いている基板のファイルやプロジェクトは変えない）。
++  pcbnew.SaveBoard は写しを保存するときだけ使う（開いている基板のファイルへは保存できない。保存は利用者が Ctrl+S でする）。
 +  sys.exit など KiCad を終わらせることはしない
  - check: 基板の写しを保存して DRC をかけ、違反と未配線の一覧を返す（開いている基板は変えない）
  - render: 基板の写しを画像にして見る（上・下・斜め）
