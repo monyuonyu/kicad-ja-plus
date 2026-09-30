@@ -1,0 +1,81 @@
+From 1babea0d9941b19a8466188314713603171ea305 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Wed, 30 Sep 2026 16:52:47 +0900
+Subject: [PATCH] AI chat: write long lines to the bridge until done (hung
+ above 64KB); trim large run_python outputs; keep KICAD_RUN_FROM_BUILD_DIR for
+ a kicad-cli of the build dir
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ pcbnew/widgets/panel_ai_chat.cpp | 29 +++++++++++++++++++++++++++--
+ scripting/kicad_ai/bridge.py     |  7 ++++++-
+ 2 files changed, 33 insertions(+), 3 deletions(-)
+
+diff --git a/pcbnew/widgets/panel_ai_chat.cpp b/pcbnew/widgets/panel_ai_chat.cpp
+index 0e27e06..b3bc255 100644
+--- a/pcbnew/widgets/panel_ai_chat.cpp
++++ b/pcbnew/widgets/panel_ai_chat.cpp
+@@ -619,8 +619,27 @@ void PANEL_AI_CHAT::sendJson( const std::string& aLine )
+     if( !m_process || !m_process->GetOutputStream() )
+         return;
+ 
+-    std::string line = aLine + "\n";
+-    m_process->GetOutputStream()->Write( line.data(), line.size() );
++    // パイプの受け皿（64KB）を超える行は、一度では書き切れない。書き終わるまで繰り返す
++    // （仲介役は別のスレッドで読み続けているので、待てば空く。止まったままなら 10 秒であきらめる）
++    std::string     line = aLine + "\n";
++    wxOutputStream* out = m_process->GetOutputStream();
++    size_t          done = 0;
++    wxLongLong      start = wxGetLocalTimeMillis();
++
++    while( done < line.size() )
++    {
++        out->Write( line.data() + done, line.size() - done );
++        size_t n = out->LastWrite();
++        done += n;
++
++        if( n == 0 )
++        {
++            if( wxGetLocalTimeMillis() - start > 10000 )
++                break;
++
++            wxMilliSleep( 5 );
++        }
++    }
+ }
+ 
+ 
+@@ -762,6 +781,12 @@ void PANEL_AI_CHAT::handleLine( const std::string& aLine )
+                 m_timer.Start( 100 );
+         }
+ 
++        // 大きすぎる出力は、後ろの 20,000 文字だけを渡す（AI にも読み切れない）
++        const size_t limit = 20000;
++
++        if( out.length() > limit )
++            out = wxString::Format( J( "…（前の %zu 文字を省いた）\n" ), out.length() - limit ) + out.Right( limit );
++
+         sendJson( nlohmann::json( { { "type", "py_result" }, { "id", id }, { "ok", ok },
+                                     { "output", out.ToStdString( wxConvUTF8 ) } } ).dump() );
+     }
+diff --git a/scripting/kicad_ai/bridge.py b/scripting/kicad_ai/bridge.py
+index 4d9ce08..cd1a0ef 100644
+--- a/scripting/kicad_ai/bridge.py
++++ b/scripting/kicad_ai/bridge.py
+@@ -126,7 +126,12 @@ def cli_env():
+     """kicad-cli を呼ぶときの環境。KiCad をビルドした場所から動かしているときの印は外す
+     （引き継ぐと、入れてある kicad-cli が自分の部品をビルドの場所で探して失敗する）"""
+     env = dict(os.environ)
+-    env.pop("KICAD_RUN_FROM_BUILD_DIR", None)
++    # ただし、使う kicad-cli がビルドした場所の物なら、印が要る（無いと自分の部品を自分の隣で探して失敗する）
++    cli = os.environ.get("KICAD_AI_CLI", "")
++    in_build_dir = bool(cli) and os.path.exists(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(cli))),
++                                                             "CMakeCache.txt"))
++    if not in_build_dir:
++        env.pop("KICAD_RUN_FROM_BUILD_DIR", None)
+     return env
+ 
+ 
+-- 
+2.43.0
+
