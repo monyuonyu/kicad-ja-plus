@@ -1,0 +1,70 @@
+From 995fc439b5d597ef2f8e631016bd41ca2bf70aa5 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Wed, 30 Sep 2026 15:55:17 +0900
+Subject: [PATCH] AI chat (8.0.9): block LoadBoard/NewBoard and save boards
+ without settings while the AI's code runs
+
+pcbnew.LoadBoard in the GUI loads another project into the settings manager and changes global settings, and pcbnew
+crashed afterwards (BOARD::GetVisibleElements). SaveBoard with settings moves the open project to the copy.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../python/scripting/pcbnew_action_plugins.cpp | 18 ++++++++++++++++++
+ scripting/kicad_ai/bridge.py                   |  5 ++++-
+ 2 files changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/pcbnew/python/scripting/pcbnew_action_plugins.cpp b/pcbnew/python/scripting/pcbnew_action_plugins.cpp
+index 989742f..ca09b0f 100644
+--- a/pcbnew/python/scripting/pcbnew_action_plugins.cpp
++++ b/pcbnew/python/scripting/pcbnew_action_plugins.cpp
+@@ -593,6 +593,22 @@ def _kicad_ai_run(code):
+     saved = (sys.stdout, sys.stderr)
+     sys.stdout = sys.stderr = out
+     ok = True
++    # 画面の中では、開いている基板のプロジェクトや KiCad 全体の設定に触る関数を使わせない（使うと後で落ちる）
++    real = {n: getattr(pcbnew, n) for n in ("LoadBoard", "NewBoard", "SaveBoard")}
++
++    def _blocked(name):
++        def f(*a, **k):
++            raise RuntimeError(
++                "KiCad の画面の中では pcbnew.%s は使えない（別の基板のプロジェクトを読み込み、開いている基板の設定が壊れて"
++                "落ちる）。別の基板を調べるには kicad-cli（pcb drc・pcb export など）か、別のプロセスの Python を使う" % name)
++        return f
++
++    def _save_board(filename, brd, skip_settings=True):
++        # 設定も保存すると、開いているプロジェクトの場所が写し先に変わるので、基板だけを保存する
++        return real["SaveBoard"](filename, brd, True)
++    pcbnew.LoadBoard = _blocked("LoadBoard")
++    pcbnew.NewBoard = _blocked("NewBoard")
++    pcbnew.SaveBoard = _save_board
+     try:
+         board = pcbnew.GetBoard()
+         env = {"__name__": "__kicad_ai__", "pcbnew": pcbnew, "board": board,
+@@ -612,6 +628,8 @@ def _kicad_ai_run(code):
+         traceback.print_exc()
+     finally:
+         sys.stdout, sys.stderr = saved
++        for n, f in real.items():
++            setattr(pcbnew, n, f)
+     return ok, out.getvalue()
+ )PY";
+ 
+diff --git a/scripting/kicad_ai/bridge.py b/scripting/kicad_ai/bridge.py
+index 585d2aa..7f92dcf 100644
+--- a/scripting/kicad_ai/bridge.py
++++ b/scripting/kicad_ai/bridge.py
+@@ -93,7 +93,10 @@ SYSTEM = """あなたは KiCad の基板エディタに組み込まれた設計
+   線は t = pcbnew.PCB_TRACK(board); t.SetStart(...); t.SetEnd(...); t.SetWidth(FromMM(0.25));
+   t.SetLayer(pcbnew.F_Cu); t.SetNet(board.FindNet("GND")); board.Add(t)、消すのは board.Remove(item)。
+   1 回の実行が「元に戻す」の 1 段になり、エラーが起きたらその回の変更は取り消される。print の出力と、
+-  最後の式の値が返る。変えたものは実行の中ですぐ読み直せる
++  最後の式の値が返る。変えたものは実行の中ですぐ読み直せる。
++  pcbnew.LoadBoard・NewBoard は使えない（開いている基板の設定が壊れて落ちる）。別の基板を調べるには kicad-cli を使う。
++  pcbnew.SaveBoard は基板だけを保存する（開いている基板のファイルやプロジェクトは変えない）。
++  sys.exit など KiCad を終わらせることはしない
+ - check: 基板の写しを保存して DRC をかけ、違反と未配線の一覧を返す（開いている基板は変えない）
+ - render: 基板の写しを画像にして見る（上・下・斜め）
+ 
+-- 
+2.43.0
+
