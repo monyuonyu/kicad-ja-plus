@@ -1,4 +1,4 @@
-From 1babea0d9941b19a8466188314713603171ea305 Mon Sep 17 00:00:00 2001
+From c464128f3342c1c5cbf7806c1491f8b5d3b18fbc Mon Sep 17 00:00:00 2001
 From: shota <monyuonyu@gmail.com>
 Date: Wed, 30 Sep 2026 16:52:47 +0900
 Subject: [PATCH] AI chat: write long lines to the bridge until done (hung
@@ -7,12 +7,12 @@ Subject: [PATCH] AI chat: write long lines to the bridge until done (hung
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- pcbnew/widgets/panel_ai_chat.cpp | 29 +++++++++++++++++++++++++++--
+ pcbnew/widgets/panel_ai_chat.cpp | 33 +++++++++++++++++++++++++++++---
  scripting/kicad_ai/bridge.py     |  7 ++++++-
- 2 files changed, 33 insertions(+), 3 deletions(-)
+ 2 files changed, 36 insertions(+), 4 deletions(-)
 
 diff --git a/pcbnew/widgets/panel_ai_chat.cpp b/pcbnew/widgets/panel_ai_chat.cpp
-index 0e27e06..b3bc255 100644
+index 0e27e06..9404ecd 100644
 --- a/pcbnew/widgets/panel_ai_chat.cpp
 +++ b/pcbnew/widgets/panel_ai_chat.cpp
 @@ -619,8 +619,27 @@ void PANEL_AI_CHAT::sendJson( const std::string& aLine )
@@ -45,7 +45,7 @@ index 0e27e06..b3bc255 100644
  }
  
  
-@@ -762,6 +781,12 @@ void PANEL_AI_CHAT::handleLine( const std::string& aLine )
+@@ -762,8 +781,16 @@ void PANEL_AI_CHAT::handleLine( const std::string& aLine )
                  m_timer.Start( 100 );
          }
  
@@ -55,9 +55,14 @@ index 0e27e06..b3bc255 100644
 +        if( out.length() > limit )
 +            out = wxString::Format( J( "…（前の %zu 文字を省いた）\n" ), out.length() - limit ) + out.Right( limit );
 +
++        // AI のコードの出力には、UTF-8 として正しくない物が混じり得る。例外にせず置き換える
          sendJson( nlohmann::json( { { "type", "py_result" }, { "id", id }, { "ok", ok },
-                                     { "output", out.ToStdString( wxConvUTF8 ) } } ).dump() );
+-                                    { "output", out.ToStdString( wxConvUTF8 ) } } ).dump() );
++                                    { "output", std::string( out.utf8_str() ) } } )
++                          .dump( -1, ' ', false, nlohmann::json::error_handler_t::replace ) );
      }
+     else if( type == "done" )
+     {
 diff --git a/scripting/kicad_ai/bridge.py b/scripting/kicad_ai/bridge.py
 index 4d9ce08..cd1a0ef 100644
 --- a/scripting/kicad_ai/bridge.py
