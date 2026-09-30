@@ -1,4 +1,4 @@
-From 6267c76dc4a3a768257a011dba1629ff988fe3a0 Mon Sep 17 00:00:00 2001
+From e9efd700fb1821118f1636acaacbad5766102b2c Mon Sep 17 00:00:00 2001
 From: shota <monyuonyu@gmail.com>
 Date: Wed, 30 Sep 2026 14:04:24 +0900
 Subject: [PATCH] pcbnew: AI chat panel for 8.0.9 (Claude Agent SDK bridge;
@@ -20,13 +20,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  pcbnew/tools/board_editor_control.h           |   1 +
  pcbnew/tools/pcb_actions.cpp                  |   7 +
  pcbnew/tools/pcb_actions.h                    |   1 +
- pcbnew/widgets/panel_ai_chat.cpp              | 892 ++++++++++++++++++
+ pcbnew/widgets/panel_ai_chat.cpp              | 895 ++++++++++++++++++
  pcbnew/widgets/panel_ai_chat.h                | 102 ++
  scripting/CMakeLists.txt                      |  15 +
  scripting/kicad_ai/bridge.py                  | 489 ++++++++++
  scripting/kicad_ai/requirements.txt           |   4 +
  scripting/kicad_ai/setup_ai.py                |  41 +
- 16 files changed, 1828 insertions(+)
+ 16 files changed, 1831 insertions(+)
  create mode 100644 pcbnew/widgets/panel_ai_chat.cpp
  create mode 100644 pcbnew/widgets/panel_ai_chat.h
  create mode 100644 scripting/kicad_ai/bridge.py
@@ -512,10 +512,10 @@ index 626ad71..39ab2d5 100644
      // Module editor tools
 diff --git a/pcbnew/widgets/panel_ai_chat.cpp b/pcbnew/widgets/panel_ai_chat.cpp
 new file mode 100644
-index 0000000..5fc2f29
+index 0000000..c9c13a1
 --- /dev/null
 +++ b/pcbnew/widgets/panel_ai_chat.cpp
-@@ -0,0 +1,892 @@
+@@ -0,0 +1,895 @@
 +/*
 + * This program source code file is part of KiCad, a free EDA CAD application.
 + *
@@ -900,9 +900,12 @@ index 0000000..5fc2f29
 +
 +wxString PANEL_AI_CHAT::bridgePath() const
 +{
-+    return envOr( wxS( "KICAD_AI_BRIDGE" ),
-+                  PATHS::GetStockScriptingPath() + wxS( "kicad_ai" ) + wxFileName::GetPathSeparator()
-+                          + wxS( "bridge.py" ) );
++    // 8.0.9 の GetStockScriptingPath() は末尾に区切りが付かないので、wxFileName で組む
++    wxFileName fn;
++    fn.AssignDir( PATHS::GetStockScriptingPath() );
++    fn.AppendDir( wxS( "kicad_ai" ) );
++    fn.SetFullName( wxS( "bridge.py" ) );
++    return envOr( wxS( "KICAD_AI_BRIDGE" ), fn.GetFullPath() );
 +}
 +
 +
