@@ -80,6 +80,8 @@ jobs:
 
       - name: Configure
         run: |
+          # KiCad 8 の古い FindPythonLibs は MSYS2 の Python のライブラリを見つけられないので、場所を渡す
+          pyver=$(python -c 'import sys;print(f"{sys.version_info[0]}.{sys.version_info[1]}")')
           MSYS2_ARG_CONV_EXCL="-DCMAKE_PREFIX_PATH=" \
           cmake -Wno-dev -G Ninja -S kicad -B build \
             -DCMAKE_BUILD_TYPE=Release \
@@ -91,7 +93,9 @@ jobs:
             -DOCC_INCLUDE_DIR="$MINGW_PREFIX/include/opencascade" \
             -DKICAD_SCRIPTING_WXPYTHON=OFF -DKICAD_BUILD_I18N=OFF -DKICAD_BUILD_QA_TESTS=OFF \
             -DPYTHON_EXECUTABLE="$MINGW_PREFIX/bin/python.exe" \
-            -DPYTHON_ROOT_DIR="$MINGW_PREFIX" -DNGSPICE_ROOT_DIR="$MINGW_PREFIX"
+            -DPYTHON_ROOT_DIR="$MINGW_PREFIX" -DNGSPICE_ROOT_DIR="$MINGW_PREFIX" \
+            -DPYTHON_LIBRARY="$MINGW_PREFIX/lib/libpython$pyver.dll.a" \
+            -DPYTHON_INCLUDE_DIR="$MINGW_PREFIX/include/python$pyver"
 
       - name: Build
         run: |
@@ -174,7 +178,10 @@ jobs:
           if (-not ($lines -contains 'import site')) { $lines += 'import site' }
           Set-Content $pth.FullName ($lines + 'Lib\site-packages')
           Get-Content $pth.FullName
-          & "$rt/python.exe" -c "import pywintypes, claude_agent_sdk, kipy, keyring; print('AI runtime: claude-agent-sdk', claude_agent_sdk.__version__)"
+          # kipy（kicad-python）は IPC API のある版（10.0.6）だけが使う
+          $mods = "pywintypes, claude_agent_sdk, keyring"
+          if (Select-String -Quiet -Path kicad/scripting/kicad_ai/requirements.txt -Pattern '^kicad-python') { $mods += ", kipy" }
+          & "$rt/python.exe" -c "import $mods; print('AI runtime: claude-agent-sdk', claude_agent_sdk.__version__)"
           if ($LASTEXITCODE -ne 0) { throw "同梱した Python で SDK を読み込めない" }
           "{0:N0} MB" -f ((Get-ChildItem $rt -Recurse | Measure-Object Length -Sum).Sum / 1MB)
 
@@ -200,7 +207,7 @@ jobs:
           $STAGE/bin/kicad-cli.exe version
           # 基板エディタの AI チャットの仲介役が入っていること（AI チャットのある版だけ）
           if [ "${{ steps.ai.outputs.has }}" = "true" ]; then
-            for f in bridge.py run_code.py setup_ai.py requirements.txt; do
+            for f in bridge.py setup_ai.py requirements.txt; do
               test -f "$STAGE/share/kicad/scripting/kicad_ai/$f" || { echo "AI チャットのファイルが無い: $f"; exit 1; }
             done
           fi
