@@ -1,0 +1,27 @@
+From 33ea4a277a7d0e3ff9ab092a3d1d0da31d301c77 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Wed, 30 Sep 2026 15:51:26 +0900
+Subject: [PATCH] AI chat (8.0.9): get_board uses GetFPIDAsString
+ (LIB_ID::Format() cannot be called from 8.0.9's Python)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ scripting/kicad_ai/bridge.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/scripting/kicad_ai/bridge.py b/scripting/kicad_ai/bridge.py
+index e70773c..585d2aa 100644
+--- a/scripting/kicad_ai/bridge.py
++++ b/scripting/kicad_ai/bridge.py
+@@ -149,7 +149,7 @@ fps = list(b.GetFootprints())
+ out["footprints"] = len(fps)
+ for fp in fps[:300]:
+     p = fp.GetPosition()
+-    out["parts"].append({"ref": fp.GetReference(), "value": fp.GetValue(), "footprint": str(fp.GetFPID().Format()),
++    out["parts"].append({"ref": fp.GetReference(), "value": fp.GetValue(), "footprint": fp.GetFPIDAsString(),
+                          "x_mm": round(ToMM(p.x), 3), "y_mm": round(ToMM(p.y), 3),
+                          "angle": round(fp.GetOrientationDegrees(), 1), "layer": b.GetLayerName(fp.GetLayer())})
+ if len(fps) > 300:
+-- 
+2.43.0
+

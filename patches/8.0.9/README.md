@@ -19,6 +19,7 @@ kicad-cli-local の DRC/ERC をシステム版と突き合わせて確認する�
 | 10 | AI チャット: たずねずに実行する切り替え（10.0.6 の 0034 と同じ） | 利用者の希望 | 変えたファイルのコンパイル |
 | 11 | AI チャットの直し: run_python の 1 回目で落ちた（基板を文字列にする時に、SaveBoard と同じ準備をしていなかった）。ビルドした場所から動かす時は ../kicad/kicad-cli を使う | 開発環境整備のセッション（WSL）の報告 | 変えたファイルのコンパイル |
 | 12 | Windows（MinGW）でビルドできるように: 3D 画像の書き出しの TRANSPARENT・OPAQUE が Windows のヘッダーの定数とぶつかる、新しい SWIG に Python 2 の名前（PyInt_FromLong など）が無い | 8.0.9 の Windows 版のビルドで見つけた | Windows のビルド |
+| 13 | AI チャット: get_board が毎回失敗していた（8.0.9 の Python からは LIB_ID::Format() を呼べないので GetFPIDAsString に） | 開発環境整備のセッションの自動試験 | 同じ試験 |
 | (00内) | kicad_route の optimize 命令 | KiCad 11 の Optimize Route (654f0f473) | DRC 違反なし |
 
 8.0.9 向けの調整:
