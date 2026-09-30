@@ -108,7 +108,9 @@ jobs:
           cmake --install build
           # 実行に要る DLL（MSYS2 のもの）を bin に集める。ldd は固まることがある（4 時間止まった）ので、
           # objdump で各ファイルが読む DLL の名前を取り、$MINGW_PREFIX/bin にあるものを写す。写したものも同じように調べる
-          queue=$(ls $STAGE/bin/*.exe $STAGE/bin/*.dll $STAGE/bin/*.kiface $STAGE/lib/kicad/plugins/3d/*.dll 2>/dev/null)
+          # 探す元は bin と lib の下の実行ファイル・DLL・kiface・pyd（3D の読み込みなどの置き場所は版で変わるので、決め打ちしない）
+          queue=$(find $STAGE/bin $STAGE/lib -type f \( -iname '*.exe' -o -iname '*.dll' -o -iname '*.kiface' -o -iname '*.pyd' \) 2>/dev/null || true)
+          echo "調べる元: $(echo $queue | wc -w) 個"
           declare -A seen
           while [ -n "$queue" ]; do
             next=""
