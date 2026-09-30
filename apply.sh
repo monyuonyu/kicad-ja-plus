@@ -21,6 +21,12 @@ if [ -f "$P/ALL-combined.patch" ]; then
   # 8.0.9: 00〜08 をまとめたもの（新しいファイルも含む）。個々のパッチは来歴の記録
   git apply --check --binary "$P/ALL-combined.patch"
   git apply --binary --whitespace=nowarn "$P/ALL-combined.patch"
+  # その後に足した物（09 以降: AI チャット、Windows でのビルドの直しなど）は、番号順に 1 つずつ
+  for f in "$P"/[0-9]*.patch; do
+    n=$(basename "$f" | sed 's/^\([0-9]*\).*/\1/')
+    [ "$((10#$n))" -ge 9 ] || continue
+    git apply --binary --whitespace=nowarn "$f" || { echo "当たらない: $(basename "$f")" >&2; exit 1; }
+  done
 else
   # 10.0.6 以降: 番号順のパッチ（本家の MR は作者の名前つき）
   for f in "$P"/[0-9]*.patch; do

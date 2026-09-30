@@ -46,13 +46,12 @@ jobs:
       - name: Get KiCad and apply the patches
         run: |
           git clone -q --depth 1 --branch "$KV" https://github.com/KiCad/kicad-source-mirror kicad
-          cd kicad
-          # このリポジトリの改良を先に（git apply はずれを許さないので、手を入れていない版に当てる）
+          # このリポジトリの改良を先に（git apply はずれを許さないので、手を入れていない版に当てる）。
+          # 当て方は Linux と同じ apply.sh（8.0.9 はまとめたパッチ＋09 以降、10.0.6 は番号順）
           if [ "${{ inputs.apply_local }}" = "true" ]; then
-            for p in ../patches/$KV/[0-9]*.patch; do
-              git apply --whitespace=nowarn "$p" || { echo "当たらない: $p"; exit 1; }
-            done
+            ./apply.sh "$KV" "$PWD/kicad"
           fi
+          cd kicad
           # MSYS2 の Windows 向けの手直し（MINGW-packages の mingw-w64-kicad より。patch はずれを許して当てる）
           base="https://raw.githubusercontent.com/msys2/MINGW-packages/$MSYS2_PKGS_REF/mingw-w64-kicad"
           for p in 002-ki-6.0-cmake-fixes-for-MINGW-CLANG.patch 003-ki-6.0-code-fixes-for-GNUC-CLANG.patch \
