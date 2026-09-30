@@ -58,6 +58,11 @@ jobs:
                    004-fix-loading-ngspice-dll.patch 006-ki-6.0-rewrite-kiwin32_rc_for_clang.patch \
                    007-llvm-libcxx-19.patch 009-clang-needs-explicit-json-implementations.patch; do
             curl -fsSL "$base/$p" -o "../$p"
+            # この手直しは KiCad 10 向け。8.x では合わない物（clang 向けなど）は飛ばす
+            if [ "${KV%%.*}" -lt 10 ] && ! patch -Np1 --dry-run -s -i "../$p" > /dev/null; then
+              echo "飛ばす（$KV に合わない）: $p"
+              continue
+            fi
             patch -Np1 -i "../$p" || { echo "当たらない: $p"; exit 1; }
           done
 
