@@ -162,7 +162,7 @@ jobs:
           if (-not ($lines -contains 'import site')) { $lines += 'import site' }
           Set-Content $pth.FullName ($lines + 'Lib\site-packages')
           Get-Content $pth.FullName
-          & "$rt/python.exe" -c "import pywintypes, claude_agent_sdk, kipy, keyring; print('AI 用の Python:', claude_agent_sdk.__version__)"
+          & "$rt/python.exe" -c "import pywintypes, claude_agent_sdk, kipy, keyring; print('AI runtime: claude-agent-sdk', claude_agent_sdk.__version__)"
           if ($LASTEXITCODE -ne 0) { throw "同梱した Python で SDK を読み込めない" }
           "{0:N0} MB" -f ((Get-ChildItem $rt -Recurse | Measure-Object Length -Sum).Sum / 1MB)
 
