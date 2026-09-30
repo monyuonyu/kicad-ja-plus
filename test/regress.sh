@@ -65,7 +65,10 @@ chk "kicad-local review(基板だけでも ERC/DRC/3D のまとめが出る)" "k
 # 比べるのは要確認の件数だけ（「参考」のライブラリの指摘は、グローバルのライブラリ表の有無で変わる）
 sch_erc_before=$(python3 -c "import sys,pathlib,tempfile; sys.path.insert(0,'$KICAD_LOCAL_HOME/tools'); import review; print(review.erc(pathlib.Path('sch/interf_u.kicad_sch'), pathlib.Path(tempfile.mkdtemp()))[0].split('、')[0])" 2>/dev/null)
 [ -n "$sch_erc_before" ] || sch_erc_before="(元の回路図の ERC を取れない)"
-chk "kicad-local sch(直列挿入で接続が 1 本増え、ERC は増えない)" "printf 'insert R99 1k Device:R at R4.1\n' | kicad-local sch sch/interf_u.kicad_sch now/sch_out.kicad_sch - > now/sch.log; grep -q '新しいネット \*\*Net-(D1-A)\*\*: D1.2 R99.2' now/sch.log && grep -qF -- \"--- ERC: $sch_erc_before\" now/sch.log"
+# 書き出す先にも、元のプロジェクトの部品ライブラリ表（sym-lib-table など）と .kicad_pro を置く。
+# 無いと、プロジェクトのライブラリ（interf_u_schlib）が見つからないという指摘が増える（KiCad 8 で見つけた）
+mkdir -p now/schx && cp sch/sym-lib-table sch/fp-lib-table sch/*.kicad_sym now/schx/ && cp sch/interf_u.kicad_pro now/schx/sch_out.kicad_pro
+chk "kicad-local sch(直列挿入で接続が 1 本増え、ERC は増えない)" "printf 'insert R99 1k Device:R at R4.1\n' | kicad-local sch sch/interf_u.kicad_sch now/schx/sch_out.kicad_sch - > now/sch.log; grep -q '新しいネット \*\*Net-(D1-A)\*\*: D1.2 R99.2' now/sch.log && grep -qF -- \"--- ERC: $sch_erc_before\" now/sch.log"
 chk "基板の寄生インダクタンス(R10.2→C5.1 が 3.32nH)" "kicad-python $KICAD_LOCAL_HOME/tools/ksim/pcbpar.py in.kicad_pcb 'Net-(C5-Pad1)' R10.2 | grep -q 'C5.1 *L   3.32'"
 # 厳しい DRC: R10.1 のネットを外した基板で、ネットの無いパッドと、デモにもともとある細い配線(VCC_PIC 0.35mm)を見つけ、終了コード 1
 python3 - <<'PY'

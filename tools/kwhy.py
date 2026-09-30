@@ -47,10 +47,13 @@ def mm(v):
 
 
 def item_by_uuid(board, uuid):
-    try:
+    if hasattr(board, "ResolveItem"):
         it = board.ResolveItem(pcbnew.KIID(uuid), True)
-    except Exception:   # noqa: BLE001  古い版の pcbnew には ResolveItem が無い
-        it = None
+    else:
+        # 8.0 には ResolveItem が無い。GetItem は、見つからないと DELETED_BOARD_ITEM を返す
+        it = board.GetItem(pcbnew.KIID(uuid))
+        if it is not None and it.GetClass() == "DELETED_BOARD_ITEM":
+            it = None
     # 共通の型（BOARD_ITEM）で返るので、パッドなどの本当の型にする
     return it.Cast() if it is not None and hasattr(it, "Cast") else it
 

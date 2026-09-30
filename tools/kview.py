@@ -142,16 +142,26 @@ def main():
             if len(pts) > 2:
                 c.d.polygon(pts, fill=(120, 0, 160, 40), outline=(120, 0, 160))
     # 外形
-    for d in board.GetDrawings():
-        if d.GetLayer() == pcbnew.Edge_Cuts and isinstance(d, pcbnew.PCB_SHAPE):
-            s = d.GetEffectiveShape()
-            poly = pcbnew.SHAPE_POLY_SET()
-            d.TransformShapeToPolygon(poly, pcbnew.Edge_Cuts, 0, pcbnew.FromMM(0.01), pcbnew.ERROR_INSIDE)
-            for i in range(poly.OutlineCount()):
-                o = poly.Outline(i)
-                pts = [c.p(mm(o.CPoint(k).x), mm(o.CPoint(k).y)) for k in range(o.PointCount())]
-                if len(pts) > 1:
-                    c.d.line(pts + [pts[0]], fill=EDGE, width=2)
+    # 8.0 の pcbnew は ERROR_LOC を Python に出していないので、TransformShapeToPolygon が使えない。
+    # その時は、外形は基板の外形の多角形、パッドは GetEffectivePolygon で描く
+    old_api = not hasattr(pcbnew, "ERROR_INSIDE")
+    edges = []
+    if old_api:
+        poly = pcbnew.SHAPE_POLY_SET()
+        board.GetBoardPolygonOutlines(poly)
+        edges.append(poly)
+    else:
+        for d in board.GetDrawings():
+            if d.GetLayer() == pcbnew.Edge_Cuts and isinstance(d, pcbnew.PCB_SHAPE):
+                poly = pcbnew.SHAPE_POLY_SET()
+                d.TransformShapeToPolygon(poly, pcbnew.Edge_Cuts, 0, pcbnew.FromMM(0.01), pcbnew.ERROR_INSIDE)
+                edges.append(poly)
+    for poly in edges:
+        for i in range(poly.OutlineCount()):
+            o = poly.Outline(i)
+            pts = [c.p(mm(o.CPoint(k).x), mm(o.CPoint(k).y)) for k in range(o.PointCount())]
+            if len(pts) > 1:
+                c.d.line(pts + [pts[0]], fill=EDGE, width=2)
     # 配線（裏から）
     for l in reversed(cu):
         for t in board.GetTracks():
@@ -165,11 +175,14 @@ def main():
     # パッド
     for fp in board.GetFootprints():
         for p in fp.Pads():
-            poly = pcbnew.SHAPE_POLY_SET()
             layer = next((l for l in cu if p.IsOnLayer(l)), None)
             if layer is None:
                 continue
-            p.TransformShapeToPolygon(poly, layer, 0, pcbnew.FromMM(0.01), pcbnew.ERROR_INSIDE)
+            if old_api:
+                poly = p.GetEffectivePolygon()
+            else:
+                poly = pcbnew.SHAPE_POLY_SET()
+                p.TransformShapeToPolygon(poly, layer, 0, pcbnew.FromMM(0.01), pcbnew.ERROR_INSIDE)
             hi = a.net and picked(p.GetNetname())
             for i in range(poly.OutlineCount()):
                 o = poly.Outline(i)
@@ -180,7 +193,7 @@ def main():
     for t in board.GetTracks():
         if isinstance(t, pcbnew.PCB_VIA):
             x, y = c.p(mm(t.GetPosition().x), mm(t.GetPosition().y))
-            r = c.px(mm(t.GetWidth(pcbnew.F_Cu)) / 2)
+            r = c.px(mm(t.GetWidth() if old_api else t.GetWidth(pcbnew.F_Cu)) / 2)  # 8.0 は層を取らない
             hi = a.net and picked(t.GetNetname())
             c.d.ellipse([x - r, y - r, x + r, y + r], fill=HIGHLIGHT if hi else fade(VIA, dim))
     # 部品番号
