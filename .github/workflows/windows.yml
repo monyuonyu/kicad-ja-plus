@@ -139,11 +139,19 @@ jobs:
 
       # 基板エディタの AI チャット用の Python を同梱する（インストールしてすぐ、ダウンロードなしで使える）。
       # python.org の埋め込み用の Python に、requirements.txt の物（版は固定）を入れる。置き場は <KiCad>/ai-runtime
+      # AI チャットは 10.0.6 のパッチ（0032）にだけある。無い版（8.0.9 など）では同梱と確かめを飛ばす
+      - name: Does this version have the AI chat
+        id: ai
+        run: |
+          if [ -d kicad/scripting/kicad_ai ]; then echo "has=true" >> "$GITHUB_OUTPUT"; else echo "has=false" >> "$GITHUB_OUTPUT"; fi
+
       - uses: actions/setup-python@v5
+        if: steps.ai.outputs.has == 'true'
         with:
           python-version: "3.14"
 
       - name: Bundle the AI chat runtime
+        if: steps.ai.outputs.has == 'true'
         shell: pwsh
         run: |
           $ver = "3.14.7"
@@ -167,6 +175,7 @@ jobs:
           "{0:N0} MB" -f ((Get-ChildItem $rt -Recurse | Measure-Object Length -Sum).Sum / 1MB)
 
       - name: Smoke test (AI chat bridge, offline parts only)
+        if: steps.ai.outputs.has == 'true'
         shell: pwsh
         run: |
           # 同梱の Python だけで仲介役が起動し、キーが無ければ「need_key」を返すこと（AI には接続しない）
@@ -185,10 +194,12 @@ jobs:
         run: |
           cd kicad/demos/pic_programmer
           $STAGE/bin/kicad-cli.exe version
-          # 基板エディタの AI チャットの仲介役が入っていること
-          for f in bridge.py run_code.py setup_ai.py requirements.txt; do
-            test -f "$STAGE/share/kicad/scripting/kicad_ai/$f" || { echo "AI チャットのファイルが無い: $f"; exit 1; }
-          done
+          # 基板エディタの AI チャットの仲介役が入っていること（AI チャットのある版だけ）
+          if [ "${{ steps.ai.outputs.has }}" = "true" ]; then
+            for f in bridge.py run_code.py setup_ai.py requirements.txt; do
+              test -f "$STAGE/share/kicad/scripting/kicad_ai/$f" || { echo "AI チャットのファイルが無い: $f"; exit 1; }
+            done
+          fi
           $STAGE/bin/kicad-cli.exe pcb drc -o "$GITHUB_WORKSPACE/drc.rpt" pic_programmer.kicad_pcb || true
           test -s "$GITHUB_WORKSPACE/drc.rpt" && head -5 "$GITHUB_WORKSPACE/drc.rpt"
           $STAGE/bin/kicad-cli.exe pcb export stats -o "$GITHUB_WORKSPACE/stats.txt" pic_programmer.kicad_pcb
