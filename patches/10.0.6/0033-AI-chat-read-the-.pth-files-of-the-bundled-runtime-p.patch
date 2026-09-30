@@ -1,0 +1,42 @@
+From dee4b5848c4aa0d78d1886fb4b4bb1d1406af206 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Wed, 30 Sep 2026 11:47:44 +0900
+Subject: [PATCH] AI chat: read the .pth files of the bundled runtime (pywin32
+ on Windows)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ scripting/kicad_ai/bridge.py | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/scripting/kicad_ai/bridge.py b/scripting/kicad_ai/bridge.py
+index 2674a4a8..d6bb046f 100644
+--- a/scripting/kicad_ai/bridge.py
++++ b/scripting/kicad_ai/bridge.py
+@@ -418,6 +418,15 @@ def default_datadir():
+     return os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "kicad-ja-plus")
+ 
+ 
++def read_bundled_pth():
++    """同梱した部品（ai-runtime）の .pth を読む。pywin32（Windows で SDK が使う）は .pth で自分の場所を足すが、
++    PYTHONPATH で足した場所や、埋め込み用 Python の ._pth に書いた場所の .pth は、Python が読まない"""
++    import site
++    for p in list(sys.path):
++        if "ai-runtime" in p and os.path.isdir(p) and any(n.endswith(".pth") for n in os.listdir(p)):
++            site.addsitedir(p)
++
++
+ def main():
+     # KiCad とのやり取りは UTF-8 の JSON 行（Windows のパイプは既定でロケールの符号 cp932 などになる）
+     for stream in (sys.stdin, sys.stdout, sys.stderr):
+@@ -445,6 +454,7 @@ def main():
+     if args.delete_key:
+         delete_key(args.datadir)
+         return
++    read_bundled_pth()
+     global AssistantMessage, ClaudeAgentOptions, ClaudeSDKClient, ResultMessage, TextBlock
+     global create_sdk_mcp_server, tool
+     try:
+-- 
+2.43.0
+

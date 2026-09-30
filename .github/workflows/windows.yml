@@ -156,9 +156,13 @@ jobs:
             --target "$rt/Lib/site-packages" -r kicad/scripting/kicad_ai/requirements.txt
           if ($LASTEXITCODE -ne 0) { throw "pip install に失敗" }
           # 埋め込み用の Python は ._pth に書いた場所しか見ないので、site-packages を足す
+          # さらに site を有効にして、site-packages の .pth（pywin32 が自分の場所を足す）も読ませる
           $pth = Get-ChildItem "$rt/python*._pth" | Select-Object -First 1
-          Add-Content $pth.FullName "Lib\site-packages"
-          & "$rt/python.exe" -c "import claude_agent_sdk, kipy, keyring; print('AI 用の Python:', claude_agent_sdk.__version__)"
+          $lines = (Get-Content $pth.FullName) -replace '^#\s*import site', 'import site'
+          if (-not ($lines -contains 'import site')) { $lines += 'import site' }
+          Set-Content $pth.FullName ($lines + 'Lib\site-packages')
+          Get-Content $pth.FullName
+          & "$rt/python.exe" -c "import pywintypes, claude_agent_sdk, kipy, keyring; print('AI 用の Python:', claude_agent_sdk.__version__)"
           if ($LASTEXITCODE -ne 0) { throw "同梱した Python で SDK を読み込めない" }
           "{0:N0} MB" -f ((Get-ChildItem $rt -Recurse | Measure-Object Length -Sum).Sum / 1MB)
 
