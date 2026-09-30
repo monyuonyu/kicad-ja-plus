@@ -4,11 +4,11 @@ Unicode true
 
 Name "KiCad (kicad-ja-plus) ${VERSION}"
 OutFile "${OUTFILE}"
-InstallDir "$PROGRAMFILES64\KiCad-ja-local\${VERSION}"
+InstallDir "$PROGRAMFILES64\KiCad-ja-plus\${VERSION}"
 RequestExecutionLevel admin
 SetCompressor /SOLID lzma
 
-!define REGKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\KiCad-ja-local-${VERSION}"
+!define REGKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\KiCad-ja-plus-${VERSION}"
 
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -21,9 +21,9 @@ Section "Install"
   SetOutPath "$INSTDIR"
   File /r "${STAGE}\*.*"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
-  CreateDirectory "$SMPROGRAMS\KiCad-ja-local ${VERSION}"
-  CreateShortcut "$SMPROGRAMS\KiCad-ja-local ${VERSION}\KiCad.lnk" "$INSTDIR\bin\kicad.exe"
-  CreateShortcut "$SMPROGRAMS\KiCad-ja-local ${VERSION}\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
+  CreateDirectory "$SMPROGRAMS\KiCad-ja-plus ${VERSION}"
+  CreateShortcut "$SMPROGRAMS\KiCad-ja-plus ${VERSION}\KiCad.lnk" "$INSTDIR\bin\kicad.exe"
+  CreateShortcut "$SMPROGRAMS\KiCad-ja-plus ${VERSION}\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
   WriteRegStr HKLM "${REGKEY}" "DisplayName" "KiCad (kicad-ja-plus) ${VERSION}"
   WriteRegStr HKLM "${REGKEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKLM "${REGKEY}" "Publisher" "kicad-ja-plus"
@@ -35,7 +35,7 @@ Section "Install"
 SectionEnd
 
 Section "Uninstall"
-  RMDir /r "$SMPROGRAMS\KiCad-ja-local ${VERSION}"
+  RMDir /r "$SMPROGRAMS\KiCad-ja-plus ${VERSION}"
   DeleteRegKey HKLM "${REGKEY}"
   RMDir /r "$INSTDIR"
 SectionEnd
