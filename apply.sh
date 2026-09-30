@@ -18,7 +18,7 @@ if [ "$(git rev-parse HEAD)" != "$BASE" ]; then
   echo "注意: $SRC は $VER ($BASE) ではない。当たらない可能性がある" >&2
 fi
 if [ -f "$P/ALL-combined.patch" ]; then
-  # 8.0.9: 00〜08 をまとめたもの（新しいファイルも含む）。個々のパッチは来歴の記録
+  # 8.0.9: 00〜08 をまとめたもの（新しいファイルも含む）。00〜08 の個々のパッチは来歴の記録
   git apply --check --binary "$P/ALL-combined.patch"
   git apply --binary --whitespace=nowarn "$P/ALL-combined.patch"
   # その後に足した物（09 以降: AI チャット、Windows でのビルドの直しなど）は、番号順に 1 つずつ
