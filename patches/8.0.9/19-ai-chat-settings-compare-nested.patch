@@ -1,0 +1,58 @@
+From ae6b012401151ed6d3489f2fc563efb662cdf5e4 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Wed, 30 Sep 2026 17:14:06 +0900
+Subject: [PATCH] AI chat (8.0.9): write the nested design and net settings
+ back to the project JSON before comparing (Store() skips nested settings)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../python/scripting/pcbnew_action_plugins.cpp   | 16 ++++++++++++----
+ 1 file changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/pcbnew/python/scripting/pcbnew_action_plugins.cpp b/pcbnew/python/scripting/pcbnew_action_plugins.cpp
+index b4b4f0c..3c60d63 100644
+--- a/pcbnew/python/scripting/pcbnew_action_plugins.cpp
++++ b/pcbnew/python/scripting/pcbnew_action_plugins.cpp
+@@ -684,11 +684,19 @@ static std::string formatBoardForCompare( BOARD* aBoard )
+ 
+ 
+ /// プロジェクトの設定（設計のルール・ネットクラスなど。.kicad_pro の中身）を文字にする
+-static std::string formatProjectSettings( PROJECT& aProject )
++static std::string formatProjectSettings( PROJECT& aProject, BOARD* aBoard )
+ {
+     try
+     {
+-        return aProject.GetProjectFile().FormatAsString();
++        // 入れ子の設定（設計のルール・ネットの設定）は、自分の SaveToFile で親の JSON へ書き戻さないと、
++        // プロジェクトの FormatAsString に今の値が出ない（入れ子の SaveToFile はディスクには書かない）
++        PROJECT_FILE& file = aProject.GetProjectFile();
++        aBoard->GetDesignSettings().SaveToFile();
++
++        if( file.NetSettings() )
++            file.NetSettings()->SaveToFile();
++
++        return file.FormatAsString();
+     }
+     catch( ... )
+     {
+@@ -797,7 +805,7 @@ wxString PCB_EDIT_FRAME::RunAiPython( const std::string& aCode, bool aWrite, con
+ 
+     const std::string before = formatBoardForCompare( pcb );
+     // 設計のルール・ネットクラスなどは基板のファイルでなくプロジェクトの側にあるので、別に控える
+-    const std::string settingsBefore = formatProjectSettings( Prj() );
++    const std::string settingsBefore = formatProjectSettings( Prj(), pcb );
+     BOARD_COMMIT      commit( this );
+ 
+     ACTION_PLUGINS::SetActionRunning( true );
+@@ -848,7 +856,7 @@ wxString PCB_EDIT_FRAME::RunAiPython( const std::string& aCode, bool aWrite, con
+         addNew( zone );
+ 
+     const bool changed = addedOrDeleted > 0 || formatBoardForCompare( pcb ) != before;
+-    const bool settingsChanged = formatProjectSettings( Prj() ) != settingsBefore;
++    const bool settingsChanged = formatProjectSettings( Prj(), pcb ) != settingsBefore;
+ 
+     if( !aOk && settingsChanged )
+     {
+-- 
+2.43.0
+
