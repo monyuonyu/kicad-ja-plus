@@ -17,6 +17,8 @@ kicad-cli-local の DRC/ERC をシステム版と突き合わせて確認する�
 | 08 | `kicad-gerber`（info / diff / dirdiff）。差分画像は 灰=共通・赤=消えた・緑=増えた・青枠と番号=差のある場所、場所の座標一覧つき。`kicad-local fabdiff`（2 つの基板の製造データを層ごとに比較）と `renderdiff`（3D 画像の差分） | KiCad 11 の gerber_diff.cpp / gerber_to_polyset.cpp（4852b8485 以降）を移植。PNG は 8.0.9 に PNG プロッタが無いため Cairo で自前描画。gerbview の job の仕組みは移植していない | 同じ基板の 2 つの版の比較で、全層の差がすべて意図した変更で説明できることを確認。副産物として出力設定の穴の印(drillshape 1)を発見 |
 | 09 | 基板エディタの AI チャットの枠（Claude Agent SDK。10.0.6 の 0032・0033 と同じ画面と使い方）。8.0.9 には IPC API が無いので、承認したコードは KiCad の中の Python（pcbnew）で実行し、アクションプラグインと同じ仕組みで「元に戻す」の 1 段にする（変わらなかった回は段を作らない、誤りの回は取り消す）。基板を変える実行は、画面で承認した番号のものだけを受け付ける | 独自 | 変えたファイルのコンパイル |
 | 10 | AI チャット: たずねずに実行する切り替え（10.0.6 の 0034 と同じ） | 利用者の希望 | 変えたファイルのコンパイル |
+| 11 | AI チャットの直し: run_python の 1 回目で落ちた（基板を文字列にする時に、SaveBoard と同じ準備をしていなかった）。ビルドした場所から動かす時は ../kicad/kicad-cli を使う | 開発環境整備のセッション（WSL）の報告 | 変えたファイルのコンパイル |
+| 12 | Windows（MinGW）でビルドできるように: 3D 画像の書き出しの TRANSPARENT・OPAQUE が Windows のヘッダーの定数とぶつかる、新しい SWIG に Python 2 の名前（PyInt_FromLong など）が無い | 8.0.9 の Windows 版のビルドで見つけた | Windows のビルド |
 | (00内) | kicad_route の optimize 命令 | KiCad 11 の Optimize Route (654f0f473) | DRC 違反なし |
 
 8.0.9 向けの調整:

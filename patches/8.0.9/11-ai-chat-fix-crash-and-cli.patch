@@ -1,0 +1,122 @@
+From fd31f8f497b3c877a47dda847bab68458e687f6d Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Wed, 30 Sep 2026 15:42:54 +0900
+Subject: [PATCH] AI chat (8.0.9): prepare the S-expression writer like
+ SaveBoard before formatting the board; use the kicad-cli of the build dir
+
+Formatting the board with PCB_IO_KICAD_SEXPR::Format() without setting m_board crashed in BOARD::GetLayerName on the
+first run_python. When running from the build dir, ../kicad/kicad-cli is used instead of a kicad-cli on PATH.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../scripting/pcbnew_action_plugins.cpp       | 43 +++++++++++++------
+ pcbnew/widgets/panel_ai_chat.cpp              | 22 +++++++---
+ 2 files changed, 48 insertions(+), 17 deletions(-)
+
+diff --git a/pcbnew/python/scripting/pcbnew_action_plugins.cpp b/pcbnew/python/scripting/pcbnew_action_plugins.cpp
+index 38f9701..989742f 100644
+--- a/pcbnew/python/scripting/pcbnew_action_plugins.cpp
++++ b/pcbnew/python/scripting/pcbnew_action_plugins.cpp
+@@ -45,6 +45,7 @@
+ #include "../../scripting/python_scripting.h"
+ #include <pcb_io/kicad_sexpr/pcb_io_kicad_sexpr.h>
+ #include <richio.h>
++#include <locale_io.h>
+ #include <tool/actions.h>
+ 
+ PYTHON_ACTION_PLUGIN::PYTHON_ACTION_PLUGIN( PyObject* aAction )
+@@ -615,23 +616,41 @@ def _kicad_ai_run(code):
+ )PY";
+ 
+ 
+-/// 基板全体をファイルと同じ形の文字列にする（実行の前後で変わったかを見るため）
+-static std::string formatBoardForCompare( BOARD* aBoard )
++/// 基板全体をファイルと同じ形の文字列にする（実行の前後で変わったかを見るため）。
++/// Format() は層の名前などを m_board から読むので、SaveBoard と同じ準備をしてから呼ぶ
++/// （準備なしに呼ぶと m_board が空のまま GetLayerName を呼んで落ちる）
++class AI_BOARD_FORMATTER : public PCB_IO_KICAD_SEXPR
+ {
+-    STRING_FORMATTER   sf;
+-    PCB_IO_KICAD_SEXPR io;
++public:
++    std::string Run( BOARD* aBoard )
++    {
++        LOCALE_IO        toggle;
++        STRING_FORMATTER sf;
+ 
+-    io.SetOutputFormatter( &sf );
++        init( nullptr );
++        m_board = aBoard;
++        m_mapping->SetBoard( aBoard );
++        SetOutputFormatter( &sf );
+ 
+-    try
+-    {
+-        io.Format( aBoard );
+-    }
+-    catch( ... )
+-    {
++        try
++        {
++            Format( aBoard, 1 );
++        }
++        catch( ... )
++        {
++        }
++
++        SetOutputFormatter( nullptr );
++        m_board = nullptr;
++        return sf.GetString();
+     }
++};
+ 
+-    return sf.GetString();
++
++static std::string formatBoardForCompare( BOARD* aBoard )
++{
++    AI_BOARD_FORMATTER fmt;
++    return fmt.Run( aBoard );
+ }
+ 
+ 
+diff --git a/pcbnew/widgets/panel_ai_chat.cpp b/pcbnew/widgets/panel_ai_chat.cpp
+index 765c375..e240d36 100644
+--- a/pcbnew/widgets/panel_ai_chat.cpp
++++ b/pcbnew/widgets/panel_ai_chat.cpp
+@@ -528,16 +528,28 @@ void PANEL_AI_CHAT::startBridge()
+     wxExecuteEnv env;
+     wxGetEnvMap( &env.env );
+     // DRC と画像は、基板の写しに kicad-cli をかける。この KiCad と同じ場所の kicad-cli を使う
++    // （ビルドした場所から動かしている時は ../kicad/kicad-cli。PATH の別の kicad-cli を使わないように）
+     if( env.env.find( wxS( "KICAD_AI_CLI" ) ) == env.env.end() )
+     {
+-        wxFileName cli( wxStandardPaths::Get().GetExecutablePath() );
+ #ifdef __WINDOWS__
+-        cli.SetFullName( wxS( "kicad-cli.exe" ) );
++        const wxString cliName = wxS( "kicad-cli.exe" );
+ #else
+-        cli.SetFullName( wxS( "kicad-cli" ) );
++        const wxString cliName = wxS( "kicad-cli" );
+ #endif
+-        if( cli.FileExists() )
+-            env.env[wxS( "KICAD_AI_CLI" )] = cli.GetFullPath();
++        wxFileName besideExe( wxStandardPaths::Get().GetExecutablePath() );
++        besideExe.SetFullName( cliName );
++        wxFileName inBuildDir( besideExe );
++        inBuildDir.RemoveLastDir();
++        inBuildDir.AppendDir( wxS( "kicad" ) );
++
++        for( const wxFileName& cli : { besideExe, inBuildDir } )
++        {
++            if( cli.FileExists() )
++            {
++                env.env[wxS( "KICAD_AI_CLI" )] = cli.GetFullPath();
++                break;
++            }
++        }
+     }
+     env.env[wxS( "PYTHONIOENCODING" )] = wxS( "utf-8" );
+     env.env[wxS( "PYTHONUNBUFFERED" )] = wxS( "1" );
+-- 
+2.43.0
+
