@@ -1,0 +1,39 @@
+From 0a9f2f672915b6493bfd761a44d44007408fe61a Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Wed, 30 Sep 2026 16:11:50 +0900
+Subject: [PATCH] AI chat: Japanese labels on the auto-approve confirmation
+ buttons regardless of the environment's language
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ pcbnew/widgets/panel_ai_chat.cpp | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/pcbnew/widgets/panel_ai_chat.cpp b/pcbnew/widgets/panel_ai_chat.cpp
+index 7f4c3417..55e6dc02 100644
+--- a/pcbnew/widgets/panel_ai_chat.cpp
++++ b/pcbnew/widgets/panel_ai_chat.cpp
+@@ -205,12 +205,14 @@ PANEL_AI_CHAT::PANEL_AI_CHAT( wxWindow* aParent, PCB_EDIT_FRAME* aFrame ) :
+ 
+ bool PANEL_AI_CHAT::confirmAutoApprove()
+ {
+-    int answer = wxMessageBox( J( "AI のコードを、あなたに見せずに実行します。基板の変更は「元に戻す」で戻せますが、"
+-                                  "コードは KiCad の外のこと（ファイルを消すなど）もできます。"
+-                                  "実行したコードは、このチャットに残します。\n\n"
+-                                  "KiCad を閉じるまで続きます。有効にしますか？" ),
+-                               J( "たずねずに実行" ), wxYES_NO | wxNO_DEFAULT | wxICON_WARNING, m_frame );
+-    return answer == wxYES;
++    wxMessageDialog dlg( m_frame, J( "AI のコードを、あなたに見せずに実行します。基板の変更は「元に戻す」で戻せますが、"
++                                     "コードは KiCad の外のこと（ファイルを消すなど）もできます。"
++                                     "実行したコードは、このチャットに残します。\n\n"
++                                     "KiCad を閉じるまで続きます。有効にしますか？" ),
++                         J( "たずねずに実行" ), wxYES_NO | wxNO_DEFAULT | wxICON_WARNING );
++    // ボタンの文字は、動かす環境の言葉に左右されないように自分で決める
++    dlg.SetYesNoLabels( J( "有効にする" ), J( "やめる" ) );
++    return dlg.ShowModal() == wxID_YES;
+ }
+ 
+ 
+-- 
+2.43.0
+

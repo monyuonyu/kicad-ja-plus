@@ -21,6 +21,7 @@ kicad-cli-local の DRC/ERC をシステム版と突き合わせて確認する�
 | 12 | Windows（MinGW）でビルドできるように: 3D 画像の書き出しの TRANSPARENT・OPAQUE が Windows のヘッダーの定数とぶつかる、新しい SWIG に Python 2 の名前（PyInt_FromLong など）が無い | 8.0.9 の Windows 版のビルドで見つけた | Windows のビルド |
 | 13 | AI チャット: get_board が毎回失敗していた（8.0.9 の Python からは LIB_ID::Format() を呼べないので GetFPIDAsString に） | 開発環境整備のセッションの自動試験 | 同じ試験 |
 | 14 | AI チャット: AI のコードの実行の間は、pcbnew.LoadBoard・NewBoard を使えなくする（別の基板のプロジェクトを読み込み、後で落ちた）。SaveBoard は写しの保存だけ（開いている基板のファイルは上書きしない。設定も保存すると、開いているプロジェクトの場所が写し先に変わるので基板だけ） | 開発環境整備のセッションの自動試験 | 偽の pcbnew での試験 |
+| 15 | AI チャット: 「たずねずに実行」の確認の窓のボタンを、環境の言葉によらず「有効にする／やめる」に | 開発環境整備のセッションの試験 | コンパイル |
 | (00内) | kicad_route の optimize 命令 | KiCad 11 の Optimize Route (654f0f473) | DRC 違反なし |
 
 8.0.9 向けの調整:
