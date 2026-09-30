@@ -1,0 +1,280 @@
+From 01a3c8b96c2197515f97d4657da51f78f582a6ff Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Wed, 30 Sep 2026 17:29:47 +0900
+Subject: [PATCH] AI chat (8.0.9): undo also covers groups and added/removed
+ nets; title block and layer names are restored on errors; stop code after 120
+ s; a failing repr keeps the run; head and tail of long output; symlink-safe
+ overwrite guard; schematic parity only with a schematic (copied with the
+ board); one DRC item per line; angles with 3 decimals
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../scripting/pcbnew_action_plugins.cpp       | 123 ++++++++++++++++--
+ scripting/kicad_ai/bridge.py                  |  19 ++-
+ 2 files changed, 130 insertions(+), 12 deletions(-)
+
+diff --git a/pcbnew/python/scripting/pcbnew_action_plugins.cpp b/pcbnew/python/scripting/pcbnew_action_plugins.cpp
+index 3c60d63..17578f0 100644
+--- a/pcbnew/python/scripting/pcbnew_action_plugins.cpp
++++ b/pcbnew/python/scripting/pcbnew_action_plugins.cpp
+@@ -51,6 +51,11 @@
+ #include <project/project_file.h>
+ #include <project/net_settings.h>
+ #include <settings/json_settings_internals.h>
++#include <pcb_group.h>
++#include <netinfo.h>
++#include <title_block.h>
++#include <set>
++#include <map>
+ 
+ PYTHON_ACTION_PLUGIN::PYTHON_ACTION_PLUGIN( PyObject* aAction )
+ {
+@@ -591,7 +596,7 @@ bool PCB_EDIT_FRAME::GetActionPluginButtonVisible( const wxString& aPluginPath,
+ // AI のコードを動かす Python。print と誤りの出力を集め、最後が式ならその値も出す（対話の画面と同じ）
+ static const char* AI_RUNNER = R"PY(
+ def _kicad_ai_run(code):
+-    import ast, io, sys, traceback
++    import ast, io, os, signal, sys, threading, traceback, _thread
+     import pcbnew
+     out = io.StringIO()
+     saved = (sys.stdout, sys.stderr)
+@@ -607,11 +612,17 @@ def _kicad_ai_run(code):
+                 "落ちる）。別の基板を調べるには kicad-cli（pcb drc・pcb export など）か、別のプロセスの Python を使う" % name)
+         return f
+ 
++    def _same_file(a, b):
++        try:
++            return os.path.samefile(a, b)
++        except OSError:
++            return os.path.realpath(a) == os.path.realpath(b)
++
+     def _save_board(filename, brd, skip_settings=True):
+-        # 開いている基板のファイルは上書きさせない（「元に戻す」で戻らない。保存は利用者が Ctrl+S で）
+-        import os
++        # 開いている基板のファイルは上書きさせない（「元に戻す」で戻らない。保存は利用者が Ctrl+S で）。
++        # シンボリックリンクなど別の名前でも同じファイルなら止める
+         open_file = pcbnew.GetBoard().GetFileName() if pcbnew.GetBoard() else ""
+-        if open_file and os.path.abspath(str(filename)) == os.path.abspath(open_file):
++        if open_file and _same_file(str(filename), open_file):
+             raise RuntimeError("開いている基板のファイルは上書きしない（「元に戻す」で戻らない）。"
+                                "保存が要るなら、利用者に Ctrl+S で保存してもらう")
+         # 設定も保存すると、開いているプロジェクトの場所が写し先に変わるので、基板だけを保存する
+@@ -619,6 +630,17 @@ def _kicad_ai_run(code):
+     pcbnew.LoadBoard = _blocked("LoadBoard")
+     pcbnew.NewBoard = _blocked("NewBoard")
+     pcbnew.SaveBoard = _save_board
++    # 終わらないコードは止める（KiCad の中で動くので、固まらないように）。見張りのスレッドから割り込みをかける
++    timeout = float(os.environ.get("KICAD_AI_CODE_TIMEOUT", "120"))
++    timed_out = []
++
++    def _stop():
++        timed_out.append(True)
++        _thread.interrupt_main()
++    old_sigint = signal.getsignal(signal.SIGINT)
++    signal.signal(signal.SIGINT, signal.default_int_handler)   # interrupt_main が KeyboardInterrupt になるように
++    timer = threading.Timer(timeout, _stop)
++    timer.daemon = True
+     try:
+         board = pcbnew.GetBoard()
+         env = {"__name__": "__kicad_ai__", "pcbnew": pcbnew, "board": board,
+@@ -628,20 +650,37 @@ def _kicad_ai_run(code):
+         last = None
+         if tree.body and isinstance(tree.body[-1], ast.Expr):
+             last = ast.Expression(tree.body.pop().value)
++        timer.start()
+         exec(compile(tree, "<AI>", "exec"), env)
+-        if last is not None:
+-            value = eval(compile(last, "<AI>", "eval"), env)
+-            if value is not None:
+-                print(repr(value))
++        value = eval(compile(last, "<AI>", "eval"), env) if last is not None else None
++        timer.cancel()
++        if value is not None:
++            # 値を文字にできなくても、済んだ変更は取り消さない
++            try:
++                shown = repr(value)
++            except Exception as e:
++                shown = "（最後の式の値を表示できない: %s: %s）" % (type(e).__name__, e)
++            if out.getvalue() and not out.getvalue().endswith("\n"):
++                out.write("\n")   # 改行なしの print に値がくっつかないように
++            out.write(shown + "\n")
+     except BaseException:
++        timer.cancel()
+         ok = False
+         traceback.print_exc()
++        if timed_out:
++            print("（%d 秒で終わらなかったので止めた）" % timeout)
+     finally:
++        timer.cancel()
++        signal.signal(signal.SIGINT, old_sigint)
+         sys.stdout, sys.stderr = saved
+         for n, f in real.items():
+             setattr(pcbnew, n, f)
++    text = out.getvalue()
++    # 長い時は、頭（最初の print や誤り）と尻の両方を残す
++    if len(text) > 19000:
++        text = text[:4000] + "\n…（途中の %d 文字を省いた）…\n" % (len(text) - 19000) + text[-15000:]
+     # NUL は C の文字列で受け取る所で後ろが切れるので、見える形に置き換える
+-    return ok, out.getvalue().replace("\0", "\\0")
++    return ok, text.replace("\0", "\\0")
+ )PY";
+ 
+ 
+@@ -796,6 +835,21 @@ wxString PCB_EDIT_FRAME::RunAiPython( const std::string& aCode, bool aWrite, con
+     for( ZONE* zone : pcb->Zones() )
+         itemsList.PushItem( ITEM_PICKER( nullptr, zone, UNDO_REDO::CHANGED ) );
+ 
++    for( PCB_GROUP* group : pcb->Groups() )
++        itemsList.PushItem( ITEM_PICKER( nullptr, group, UNDO_REDO::CHANGED ) );
++
++    // 「元に戻す」の仕組みの外にある物（ネットの一覧・図枠の文字・層の名前）も控える
++    std::set<NETINFO_ITEM*> netsBefore;
++
++    for( NETINFO_ITEM* net : pcb->GetNetInfo() )
++        netsBefore.insert( net );
++
++    const TITLE_BLOCK                     titleBefore = pcb->GetTitleBlock();
++    std::map<PCB_LAYER_ID, wxString> layerNamesBefore;
++
++    for( PCB_LAYER_ID layer : LSET::AllLayersMask().Seq() )
++        layerNamesBefore[layer] = pcb->GetLayerName( layer );
++
+     if( itemsList.GetCount() > 0 )
+         SaveCopyInUndoList( itemsList, UNDO_REDO::CHANGED );
+     else
+@@ -855,6 +909,52 @@ wxString PCB_EDIT_FRAME::RunAiPython( const std::string& aCode, bool aWrite, con
+     for( ZONE* zone : pcb->Zones() )
+         addNew( zone );
+ 
++    for( PCB_GROUP* group : pcb->Groups() )
++        addNew( group );
++
++    // ネットの追加・削除も「元に戻す」の段に入れる（KiCad の元に戻すは、ネットの追加・削除を扱える）
++    std::set<NETINFO_ITEM*> netsAfter;
++
++    for( NETINFO_ITEM* net : pcb->GetNetInfo() )
++    {
++        netsAfter.insert( net );
++
++        if( !netsBefore.count( net ) )
++        {
++            oldBuffer->PushItem( ITEM_PICKER( nullptr, net, UNDO_REDO::NEWITEM ) );
++            addedOrDeleted++;
++        }
++    }
++
++    for( NETINFO_ITEM* net : netsBefore )
++    {
++        if( !netsAfter.count( net ) )
++        {
++            oldBuffer->PushItem( ITEM_PICKER( nullptr, net, UNDO_REDO::DELETED ) );
++            addedOrDeleted++;
++        }
++    }
++
++    // 図枠の文字・層の名前は「元に戻す」で戻らないので、変わったかを見て、誤りの時はここで戻す
++    bool boardMetaChanged = !( pcb->GetTitleBlock().GetTitle() == titleBefore.GetTitle()
++                               && pcb->GetTitleBlock().GetDate() == titleBefore.GetDate()
++                               && pcb->GetTitleBlock().GetRevision() == titleBefore.GetRevision()
++                               && pcb->GetTitleBlock().GetCompany() == titleBefore.GetCompany() );
++
++    for( int ii = 0; ii < 9; ++ii )
++        boardMetaChanged |= pcb->GetTitleBlock().GetComment( ii ) != titleBefore.GetComment( ii );
++
++    for( const auto& [layer, name] : layerNamesBefore )
++        boardMetaChanged |= pcb->GetLayerName( layer ) != name;
++
++    if( !aOk && boardMetaChanged )
++    {
++        pcb->SetTitleBlock( titleBefore );
++
++        for( const auto& [layer, name] : layerNamesBefore )
++            pcb->SetLayerName( layer, name );
++    }
++
+     const bool changed = addedOrDeleted > 0 || formatBoardForCompare( pcb ) != before;
+     const bool settingsChanged = formatProjectSettings( Prj(), pcb ) != settingsBefore;
+ 
+@@ -865,6 +965,8 @@ wxString PCB_EDIT_FRAME::RunAiPython( const std::string& aCode, bool aWrite, con
+         output += wxString::FromUTF8( "（エラーのため、設計の設定の変更も取り消した）\n" );
+     }
+ 
++    const wxString metaNote = wxString::FromUTF8(
++            "（図枠の文字や層の名前を変えた。これは「元に戻す」では戻らない）\n" );
+     const wxString settingsNote = wxString::FromUTF8(
+             "（設計の設定（ルール・ネットクラスなど）を変えた。これは「元に戻す」では戻らない"
+             "（KiCad の「基板の設定」と同じ）。基板を保存すると、プロジェクトのファイルに書かれる）\n" );
+@@ -904,5 +1006,8 @@ wxString PCB_EDIT_FRAME::RunAiPython( const std::string& aCode, bool aWrite, con
+     if( settingsChanged )
+         output += settingsNote;
+ 
++    if( boardMetaChanged )
++        output += metaNote;
++
+     return output;
+ }
+diff --git a/scripting/kicad_ai/bridge.py b/scripting/kicad_ai/bridge.py
+index 3fa7c63..dade418 100644
+--- a/scripting/kicad_ai/bridge.py
++++ b/scripting/kicad_ai/bridge.py
+@@ -159,7 +159,7 @@ for fp in fps[:300]:
+     p = fp.GetPosition()
+     out["parts"].append({"ref": fp.GetReference(), "value": fp.GetValue(), "footprint": fp.GetFPIDAsString(),
+                          "x_mm": round(ToMM(p.x), 3), "y_mm": round(ToMM(p.y), 3),
+-                         "angle": round(fp.GetOrientationDegrees(), 1), "layer": b.GetLayerName(fp.GetLayer())})
++                         "angle": round(fp.GetOrientationDegrees(), 3), "layer": b.GetLayerName(fp.GetLayer())})
+ if len(fps) > 300:
+     out["parts_truncated"] = len(fps) - 300
+ kinds = collections.Counter()
+@@ -188,6 +188,13 @@ if ok:
+     pcbnew.GetSettingsManager().SaveProjectCopy(dbase + ".kicad_pro")
+     if src and os.path.exists(os.path.splitext(src)[0] + ".kicad_dru"):
+         shutil.copyfile(os.path.splitext(src)[0] + ".kicad_dru", dbase + ".kicad_dru")
++    # 回路図との照合のために、回路図（階層の下の物も）と部品ライブラリの一覧も写す
++    if src and os.path.exists(os.path.splitext(src)[0] + ".kicad_sch"):
++        sdir, ddir = os.path.dirname(src), os.path.dirname(dst)
++        for n in os.listdir(sdir):
++            if n.endswith(".kicad_sch") or n in ("sym-lib-table", "fp-lib-table"):
++                shutil.copyfile(os.path.join(sdir, n), os.path.join(ddir, n))
++        print("SCHEMATIC")
+ print("SAVED" if ok else "FAILED")
+ """
+ 
+@@ -233,6 +240,7 @@ class Bridge:
+         ok, out = await self.py(SAVE_COPY_CODE % path)
+         if not ok or "SAVED" not in out:
+             raise RuntimeError(out.strip() or "保存できない")
++        self.copy_has_schematic = "SCHEMATIC" in out
+         return path
+ 
+     # --- 道具 ---
+@@ -269,6 +277,8 @@ class Bridge:
+         cmd = [kicad_cli(), "pcb", "drc", "--format", "json", "--severity-error", "--severity-warning", "-o", rpt]
+         if args.get("refill_zones", True):
+             cmd.append("--refill-zones")
++        if getattr(self, "copy_has_schematic", False):
++            cmd.append("--schematic-parity")
+         cmd.append(path)
+         p = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, env=cli_env())
+         if not os.path.exists(rpt):
+@@ -277,12 +287,15 @@ class Bridge:
+             d = json.load(f)
+         vs = d.get("violations", [])
+         un = d.get("unconnected_items", [])
+-        lines = [f"違反 {len(vs)} 件、未配線 {len(un)} 件、回路図との食い違い {len(d.get('schematic_parity', []))} 件"]
++        parity = (f"回路図との食い違い {len(d.get('schematic_parity', []))} 件"
++                  if getattr(self, "copy_has_schematic", False) else "回路図が無いので、回路図との照合はしていない")
++        lines = [f"違反 {len(vs)} 件、未配線 {len(un)} 件、{parity}"]
+         for v in (vs + un)[:60]:
+             items = " / ".join(i.get("description", "") for i in v.get("items", [])[:2])
+             pos = v.get("pos") or (v.get("items") or [{}])[0].get("pos")
+             where = f" @({pos['x']:.2f}, {pos['y']:.2f})" if pos else ""
+-            lines.append(f"- [{v.get('severity', '')}] {v.get('type', '')}: {v.get('description', '')}{where} — {items}")
++            line = f"- [{v.get('severity', '')}] {v.get('type', '')}: {v.get('description', '')}{where} — {items}"
++            lines.append(" ".join(line.split()))
+         if len(vs) + len(un) > 60:
+             lines.append(f"…ほか {len(vs) + len(un) - 60} 件")
+         return text("\n".join(lines))
+-- 
+2.43.0
+

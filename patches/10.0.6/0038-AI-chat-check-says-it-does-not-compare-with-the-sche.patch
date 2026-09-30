@@ -1,0 +1,44 @@
+From fef96203bcefff86b399e35ab28403c6f5007cc9 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Wed, 30 Sep 2026 17:29:47 +0900
+Subject: [PATCH] AI chat: check says it does not compare with the schematic;
+ one DRC item per line; angles with 3 decimals
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ scripting/kicad_ai/bridge.py | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/scripting/kicad_ai/bridge.py b/scripting/kicad_ai/bridge.py
+index 5c4fccab..b15e8ce4 100644
+--- a/scripting/kicad_ai/bridge.py
++++ b/scripting/kicad_ai/bridge.py
+@@ -156,7 +156,7 @@ class Board:
+             val = fp.value_field.text.value
+             out["parts"].append({"ref": ref, "value": val, "footprint": str(fp.definition.id),
+                                  "x_mm": round(to_mm(fp.position.x), 3), "y_mm": round(to_mm(fp.position.y), 3),
+-                                 "angle": round(fp.orientation.degrees, 1), "layer": b.get_layer_name(fp.layer)})
++                                 "angle": round(fp.orientation.degrees, 3), "layer": b.get_layer_name(fp.layer)})
+         if len(fps) > 300:
+             out["parts_truncated"] = len(fps) - 300
+         kinds = collections.Counter()
+@@ -258,12 +258,14 @@ class Bridge:
+             d = json.load(f)
+         vs = d.get("violations", [])
+         un = d.get("unconnected_items", [])
+-        lines = [f"違反 {len(vs)} 件、未配線 {len(un)} 件、回路図との食い違い {len(d.get('schematic_parity', []))} 件"]
++        # 写しには回路図が無いので、回路図との照合はしていない（しているように見せない）
++        lines = [f"違反 {len(vs)} 件、未配線 {len(un)} 件（回路図との照合はしていない）"]
+         for v in (vs + un)[:60]:
+             items = " / ".join(i.get("description", "") for i in v.get("items", [])[:2])
+             pos = v.get("pos") or (v.get("items") or [{}])[0].get("pos")
+             where = f" @({pos['x']:.2f}, {pos['y']:.2f})" if pos else ""
+-            lines.append(f"- [{v.get('severity', '')}] {v.get('type', '')}: {v.get('description', '')}{where} — {items}")
++            line = f"- [{v.get('severity', '')}] {v.get('type', '')}: {v.get('description', '')}{where} — {items}"
++            lines.append(" ".join(line.split()))
+         if len(vs) + len(un) > 60:
+             lines.append(f"…ほか {len(vs) + len(un) - 60} 件")
+         return text("\n".join(lines))
+-- 
+2.43.0
+
