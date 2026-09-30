@@ -1,0 +1,28 @@
+From 320c97db87a693420c3bebde4e6a63e7c501b636 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Wed, 30 Sep 2026 16:56:10 +0900
+Subject: [PATCH] AI chat (8.0.9): show NUL in run_python output as \0 (the
+ rest was cut off)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ pcbnew/python/scripting/pcbnew_action_plugins.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/pcbnew/python/scripting/pcbnew_action_plugins.cpp b/pcbnew/python/scripting/pcbnew_action_plugins.cpp
+index 5f1925a..7d5d79b 100644
+--- a/pcbnew/python/scripting/pcbnew_action_plugins.cpp
++++ b/pcbnew/python/scripting/pcbnew_action_plugins.cpp
+@@ -636,7 +636,8 @@ def _kicad_ai_run(code):
+         sys.stdout, sys.stderr = saved
+         for n, f in real.items():
+             setattr(pcbnew, n, f)
+-    return ok, out.getvalue()
++    # NUL は C の文字列で受け取る所で後ろが切れるので、見える形に置き換える
++    return ok, out.getvalue().replace("\0", "\\0")
+ )PY";
+ 
+ 
+-- 
+2.43.0
+
