@@ -183,11 +183,6 @@ jobs:
           if (Select-String -Quiet -Path kicad/scripting/kicad_ai/requirements.txt -Pattern '^kicad-python') { $mods += ", kipy" }
           & "$rt/python.exe" -c "import $mods; print('AI runtime: claude-agent-sdk', claude_agent_sdk.__version__)"
           if ($LASTEXITCODE -ne 0) { throw "同梱した Python で SDK を読み込めない" }
-          # SDK に同梱の claude は agent.bin という名前にする（仲介役の bundled_agent() がこの名前で探して指す）
-          $bundled = "$rt/Lib/site-packages/claude_agent_sdk/_bundled"
-          $exe = Get-ChildItem "$bundled/claude*.exe" | Select-Object -First 1
-          if (-not $exe) { throw "SDK に claude が入っていない" }
-          Move-Item $exe.FullName "$bundled/agent.bin" -Force
           "{0:N0} MB" -f ((Get-ChildItem $rt -Recurse | Measure-Object Length -Sum).Sum / 1MB)
 
       - name: Smoke test (AI chat bridge, offline parts only)
@@ -201,11 +196,10 @@ jobs:
           $out = "" | & "$rt/python.exe" $bridge --datadir "$env:RUNNER_TEMP/ai-data"
           Write-Output $out
           if (-not ($out -match '"need_key"')) { throw "仲介役が起動しない" }
-          # 同梱の claude（agent.bin）を、仲介役と同じ探し方で見つけて動かせること（.exe でないので PowerShell からは起動できない。Python から）
-          $env:PYTHONPATH = "$env:STAGE/share/kicad/scripting/kicad_ai"
-          & "$rt/python.exe" -c "import subprocess, bridge; p = bridge.bundled_agent(); assert p and p.endswith('agent.bin'), p; r = subprocess.run([p, '--version'], capture_output=True, text=True); print(p, r.stdout.strip()); raise SystemExit(r.returncode)"
-          if ($LASTEXITCODE -ne 0) { throw "同梱の claude（agent.bin）が動かない" }
-          Remove-Item Env:PYTHONPATH
+          # SDK に入っている claude が動くこと
+          $claude = Get-ChildItem "$rt/Lib/site-packages/claude_agent_sdk/_bundled/claude*.exe" | Select-Object -First 1
+          & $claude.FullName --version
+          if ($LASTEXITCODE -ne 0) { throw "同梱の claude が動かない" }
 
       - name: Smoke test
         run: |
