@@ -1,0 +1,53 @@
+From 7b86de6ae21ea2487e5ce7397ca7644cc9ec9a89 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Fri, 2 Oct 2026 07:17:37 +0900
+Subject: [PATCH] AI chat: use the bundled claude renamed to agent.bin (the
+ distribution renames it; the SDK only looks for the original name)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ scripting/kicad_ai/bridge.py | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/scripting/kicad_ai/bridge.py b/scripting/kicad_ai/bridge.py
+index dade418..d3e8921 100644
+--- a/scripting/kicad_ai/bridge.py
++++ b/scripting/kicad_ai/bridge.py
+@@ -344,7 +344,7 @@ class Bridge:
+         os.makedirs(self.args.workdir, exist_ok=True)
+         return ClaudeAgentOptions(
+             model=self.args.model, system_prompt=SYSTEM,
+-            cli_path=self.args.claude or None,
++            cli_path=self.args.claude or bundled_agent(),
+             tools=[], allowed_tools=["mcp__kicad__*"], mcp_servers={"kicad": self.make_server()},
+             strict_mcp_config=True, setting_sources=[], cwd=self.args.workdir, max_turns=MAX_TURNS, env=env)
+ 
+@@ -476,6 +476,16 @@ def read_bundled_pth():
+             site.addsitedir(p)
+ 
+ 
++def bundled_agent():
++    """配布物では、SDK に同梱の claude を agent.bin という名前にしてある。SDK は元の名前でしか探さないので、ここで指す"""
++    try:
++        import claude_agent_sdk
++    except ImportError:
++        return None
++    p = os.path.join(os.path.dirname(claude_agent_sdk.__file__), "_bundled", "agent.bin")
++    return p if os.path.isfile(p) else None
++
++
+ def main():
+     # KiCad とのやり取りは UTF-8 の JSON 行（Windows のパイプは既定でロケールの符号 cp932 などになる）
+     for stream in (sys.stdin, sys.stdout, sys.stderr):
+@@ -489,7 +499,7 @@ def main():
+     ap.add_argument("--store-key", action="store_true", help="標準入力の API キーを保管して終わる")
+     ap.add_argument("--delete-key", action="store_true", help="保管した API キーを消して終わる")
+     ap.add_argument("--model", default="opus")
+-    ap.add_argument("--claude", default="", help="claude の実行ファイル（空なら SDK に同梱のもの）")
++    ap.add_argument("--claude", default="", help="claude の実行ファイル（空なら SDK に同梱のもの。配布物では agent.bin）")
+     ap.add_argument("--workdir", default=os.path.join(tempfile.gettempdir(), "kicad-ai"))
+     ap.add_argument("--code-timeout", type=int, default=120)
+     args = ap.parse_args()
+-- 
+2.43.0
+
