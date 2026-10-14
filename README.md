@@ -1,120 +1,124 @@
-# kicad-ja-plus — 画面なしでも基板を扱える KiCad の改良版
+**English** | [日本語](README.ja.md) | [简体中文](README.zh-CN.md)
 
-KiCad に、次のものを足したものです。版は 2 つあります。
+> Translated from [README.ja.md](README.ja.md) (the Japanese version is the original) at commit `fab6b11`.
 
-| 版 | 向いている使い方 |
+# kicad-ja-plus — an enhanced KiCad that can work on boards without a GUI
+
+This is KiCad with the additions listed below. It comes in two versions.
+
+| Version | Best for |
 |---|---|
-| **10.0.6**（おすすめ） | 最新の安定版に合わせたもの。本家の MR から、製造データや DRC の不具合の修正も取り込んでいる。**画面が無いサーバーや CI、AI からもそのまま動く** |
-| 8.0.9 | 直したファイルを KiCad 8 のまま使い続けたいとき |
+| **10.0.6** (recommended) | Based on the latest stable release. Also includes fixes for fabrication output and DRC bugs taken from upstream MRs. **Runs as-is on headless servers, in CI, and from AI agents** |
+| 8.0.9 | When you want to keep using your edited files with KiCad 8 |
 
-足したもの:
+What was added:
 
-- 画面を開かずに基板と回路図を扱う道具（配線・部品の移動・DRC/ERC・3D 画像・製造データの比較・回路の計算）
-- KiCad 9〜11 や本家の MR からの機能と修正
+- Tools for working on boards and schematics without opening the GUI (routing, moving footprints, DRC/ERC, 3D images, comparing fabrication output, circuit simulation)
+- Features and fixes from KiCad 9–11 and from upstream MRs
 
-**保存形式は、それぞれの版の本家の KiCad と同じ**なので、直したファイルはふつうの KiCad（10 または 8）でそのまま開けます。
+**The file format is the same as upstream KiCad of the same version**, so files you edit open as-is in regular KiCad (10 or 8).
 
-## できること
+## What it can do
 
-入口は `kicad-local` 1 つです（`kicad-local help` で一覧が出ます）。
+There is a single entry point, `kicad-local` (`kicad-local help` lists the commands).
 
 ```
-kicad-local drc 基板.kicad_pcb            # DRC の要点（種類ごとの件数と位置）
+kicad-local drc 基板.kicad_pcb            # DRC summary (count and location per violation type)
 kicad-local erc 回路図.kicad_sch
-kicad-local lint 回路図.kicad_sch          # 設計の定石からの外れ（外部の線の保護・ベース抵抗・電源のコンデンサ…）
-kicad-local render 基板.kicad_pcb iso      # 画面なしで 3D 画像
-kicad-local stats 基板.kicad_pcb           # 部品数・穴径など
-kicad-local drc 基板.kicad_pcb --strict    # DRC が「違反 0」でも見逃す 3 つ（ネットの無いパッド・ネットクラスより細い配線・古いベタ）も
-kicad-local why 基板.kicad_pcb             # 未配線の組ごとに「なぜ引けないか」（キープアウト・ほかのネットの銅・外形）を層ごとに
-kicad-local view 基板.kicad_pcb --drc --net GND   # 2D の図を注釈つきで画像に（ネットの強調・DRC の違反に番号）
-kicad-local autoroute 入力.kicad_pcb 出力.kicad_pcb   # 基板全体を Freerouting で自動配線し、ベタの塗り直しと DRC まで
-kicad-local finish outline|zone|stitch|islands|widen 入力 出力 ...   # 外形・ベタ・スティッチングビア・島の除去・電流から配線を太く
+kicad-local lint 回路図.kicad_sch          # departures from common design practice (protection on external lines, base resistors, supply capacitors...)
+kicad-local render 基板.kicad_pcb iso      # 3D image without a GUI
+kicad-local stats 基板.kicad_pcb           # part count, hole sizes, etc.
+kicad-local drc 基板.kicad_pcb --strict    # also the 3 things DRC misses even at "0 violations" (pads without a net, tracks thinner than the netclass, stale zone fills)
+kicad-local why 基板.kicad_pcb             # for each unrouted pair, "why it can't be routed" (keepouts, copper of other nets, board outline), per layer
+kicad-local view 基板.kicad_pcb --drc --net GND   # annotated 2D image (highlighted nets, numbered DRC violations)
+kicad-local autoroute 入力.kicad_pcb 出力.kicad_pcb   # autoroute the whole board with Freerouting, then refill zones and run DRC
+kicad-local finish outline|zone|stitch|islands|widen 入力 出力 ...   # board outline, zones, stitching vias, island removal, widening tracks from current
 
-# 部品を動かし、配線する（手順は標準入力でも可）
+# Move parts and route (steps can also come from stdin)
 kicad-local route 基板.kicad_pcb 出力.kicad_pcb - --instructions 手順.md <<'EOF'
-findspace R10 0.25                  # 置ける場所の候補
-drag R10 1,0                        # 動かすと、つながった線は迂回して引き直し、シルクの文字も逃がす
-autoroute R10.2 C5.1                # ビア 1 個までの経路を自動で探す
-check                               # その場で DRC
+findspace R10 0.25                  # candidate places where it fits
+drag R10 1,0                        # moving it reroutes the connected tracks around it and moves silkscreen text out of the way
+autoroute R10.2 C5.1                # automatically find a path with at most 1 via
+check                               # DRC on the spot
 EOF
 
-kicad-local sch 入力.kicad_sch 出力.kicad_sch 手順   # 回路図を画面なしで直す（保存後に接続と部品表の差・ERC）
-kicad-local pcbsync 回路図 基板 出力                # 回路図の変更を基板へ
-kicad-local fabdiff 前.kicad_pcb 後.kicad_pcb 比較/  # 製造データを層ごとに比べ、差分画像と場所の一覧
-kicad-local sim run 手順.toml --out 結果/            # 回路図から自動で SPICE にして計算（ngspice）
-kicad-local review 新しい版 前の版 --out 確認/        # ERC・DRC・3D・差分・計算を 1 回で → 報告.md
+kicad-local sch 入力.kicad_sch 出力.kicad_sch 手順   # edit a schematic without a GUI (after saving: connectivity and BOM diff, ERC)
+kicad-local pcbsync 回路図 基板 出力                # push schematic changes to the board
+kicad-local fabdiff 前.kicad_pcb 後.kicad_pcb 比較/  # compare fabrication output layer by layer, with diff images and a list of locations
+kicad-local sim run 手順.toml --out 結果/            # build SPICE automatically from the schematic and simulate (ngspice)
+kicad-local review 新しい版 前の版 --out 確認/        # ERC, DRC, 3D, diffs and simulation in one run → 報告.md (report)
 ```
 
-`--instructions` を付けると、同じ操作を KiCad の画面で人が再現できる手順書も出ます。
-**AI やスクリプトから使う**: drc・erc・why・view・stats・autoroute・finish は `--json` で機械が読める形を出し、drc・erc・why は要確認があれば
-終了コード 1 を返します（文章を読み解かなくても、結果で次の判断ができる）。10.0.6 版は画面（DISPLAY）が無くても動きます。
-詳しい使い方は [docs/guide.md](docs/guide.md)、道具は [tools/README.md](tools/README.md)、回路の計算は [tools/ksim/README.md](tools/ksim/README.md)。
+With `--instructions`, it also writes a step-by-step guide that lets a person reproduce the same operations in the KiCad GUI.
+**Using it from AI or scripts**: drc, erc, why, view, stats, autoroute and finish output machine-readable results with `--json`, and drc, erc and why return
+exit code 1 when something needs checking (so the next decision can be made from the result without parsing text). The 10.0.6 version runs without a display (DISPLAY).
+For details see [docs/guide.md](docs/guide.md), for the tools [tools/README.md](tools/README.md), and for circuit simulation [tools/ksim/README.md](tools/ksim/README.md).
 
-## 基板エディタの AI チャット（10.0.6 版）
+## AI chat in the PCB editor (10.0.6 version)
 
-基板エディタの「表示 → パネル → AI Chat」で、右に AI チャットの枠が出ます。開いている基板について、調べものや修正を頼めます。
+In the PCB editor, View ("表示") → Panels ("パネル") → AI Chat opens an AI chat panel on the right. You can ask it to look things up or make changes in the open board.
 
-- AI は開いている基板を読み、直します（10.0.6 は KiCad の IPC API、8.0.9 は KiCad の中の Python で）。**基板を変えるコードは、既定では実行する前に毎回、中身を見せて確認します**。
-  枠の下の「AI のコードをたずねずに実行する」を入れると、確認を省けます（入れる時に注意が出ます。保存しないので、KiCad を閉じると毎回確認に戻ります。実行したコードはチャットに残ります）。
-  実行した変更は「元に戻す」1 回で戻せ、エラーになった回の変更は取り消されます。
-- DRC と画像は、基板の写しを保存して kicad-cli にかけます（開いている基板とファイルは変えません）。
-- 使うのは **ご自身の Anthropic の API キー** です。最初に聞かれ、OS の鍵保管庫（Windows の資格情報マネージャーなど）に保存されます。
-- **Windows 版は、AI 用の Python と Claude Agent SDK をインストーラーに同梱しています**（`<KiCad>/ai-runtime`）。準備もダウンロードも要りません
-  （AI との会話そのものには、インターネットが要ります）。
-- ソースからビルドしたときは、初めて開いたときに専用の Python の環境を作るかを聞かれます（Python 3.10 以降とインターネットが要ります）。
-  手で準備するなら `python3 <KiCad の scripting>/kicad_ai/setup_ai.py`。
-- KiCad の API サーバーが止まっていれば、有効にするかを聞かれます（設定 → プラグイン と同じもの）。
+- The AI reads and edits the open board (10.0.6 uses KiCad's IPC API, 8.0.9 uses the Python inside KiCad). **By default, any code that changes the board is shown to you for confirmation every time before it runs**.
+  Checking "AI のコードをたずねずに実行する" ("run AI code without asking") at the bottom of the panel skips the confirmation (a warning is shown when you turn it on. It is not saved, so it goes back to asking every time after you close KiCad. The code that was run stays in the chat).
+  Changes that were run can be reverted with a single Undo ("元に戻す"), and changes from a run that ended in an error are rolled back.
+- DRC and images work by saving a copy of the board and running kicad-cli on it (the open board and its file are not changed).
+- It uses **your own Anthropic API key**. You are asked for it the first time, and it is stored in the OS key store (Credential Manager on Windows, etc.).
+- **The Windows version bundles the Python and Claude Agent SDK for the AI in the installer** (`<KiCad>/ai-runtime`). No setup or download is needed
+  (the conversation with the AI itself needs an Internet connection).
+- When built from source, the first time you open it you are asked whether to create a dedicated Python environment (needs Python 3.10 or later and an Internet connection).
+  To set it up by hand: `python3 <KiCad の scripting>/kicad_ai/setup_ai.py` (`<KiCad の scripting>` = KiCad's scripting directory).
+- If KiCad's API server is stopped, you are asked whether to enable it (the same setting as Preferences ("設定") → Plugins ("プラグイン")).
 
-仕組み: 枠（`pcbnew/widgets/panel_ai_chat.cpp`）は会話の表示と承認だけを受け持ち、AI とのやり取りは別プロセスの仲介役
-（`scripting/kicad_ai/bridge.py`）が行います。道具は `get_board`（概要と選択）・`run_python`（kipy のコード。承認つき）・`check`（DRC）・`render`（画像）の 4 つです。
+How it works: the panel (`pcbnew/widgets/panel_ai_chat.cpp`) only shows the conversation and handles approvals; the exchange with the AI is done by a broker in a separate process
+(`scripting/kicad_ai/bridge.py`). There are 4 tools: `get_board` (overview and selection), `run_python` (kipy code, with approval), `check` (DRC) and `render` (images).
 
-## 取り込んだ変更
+## Included changes
 
-版ごとに、出どころ（本家のコミットや MR）・その版に合わせた調整・確かめたことを書いています。
+For each version, the change list gives the source (upstream commit or MR), the adjustments made for that version, and what was verified.
 
-- [10.0.6](patches/10.0.6/README.md): このリポジトリの改良（画面なしの配線コマンド、DRC の JSON に位置と層、部品を動かすときの迂回、ガーバーの比較ほか）と、**本家の MR 11 件**（ODB++・IPC-2581 の製造データの誤り、回路図との整合チェックのバリアント対応、`--theme` にファイルほか）
-- [8.0.9](patches/8.0.9/README.md): 00〜08（ルーターの修正 19 件、KiCad 9〜11 の機能の取り込みほか）
+- [10.0.6](patches/10.0.6/README.md): this repository's improvements (headless routing commands, location and layer in DRC JSON, rerouting around moved parts, Gerber comparison, etc.) and **11 upstream MRs** (errors in ODB++ and IPC-2581 fabrication output, variant support in the schematic parity check, a file for `--theme`, etc.)
+- [8.0.9](patches/8.0.9/README.md): 00–08 (19 router fixes, features backported from KiCad 9–11, etc.)
 
-ファイルの形式を変える機能は入れていません。
+No feature that changes the file format is included.
 
-## 入れ方（Linux、ビルド済み）
+## Installing (Linux, prebuilt)
 
-Ubuntu 24.04（x86_64）向けの tar.gz を、リリースに置いています。
+A tar.gz for Ubuntu 24.04 (x86_64) is available on the Releases page.
 
-1. 本家の KiCad 10 を PPA から入れる。部品ライブラリと、wxWidgets・OpenCASCADE などの共通の部品は、これを使います。
+1. Install upstream KiCad 10 from the PPA. The part libraries and the shared components such as wxWidgets and OpenCASCADE come from it.
 
    ```
    sudo add-apt-repository ppa:kicad/kicad-10.0-releases
    sudo apt install kicad python3-numpy python3-matplotlib python3-pil
    ```
 
-2. 好きな場所に展開して、`bin/` を PATH に入れる
+2. Extract it anywhere and add `bin/` to PATH
 
    ```
    tar xzf kicad-ja-plus-10.0.6-linux-x86_64.tar.gz
    export PATH="$PWD/kicad-ja-plus-10.0.6-linux-x86_64/bin:$PATH"
    kicad-local help
-   kicad-local test        # 回帰試験。全部 OK なら入れ方は正しい
+   kicad-local test        # regression tests. If everything is OK, the installation is correct
    ```
 
-全体の自動配線（`kicad-local autoroute`）を使うときだけ、Java 21 以降と
-[Freerouting](https://github.com/freerouting/freerouting/releases) の jar が要ります（jar の場所は `--jar` か `FREEROUTING_JAR`）。
+Only whole-board autorouting (`kicad-local autoroute`) needs Java 21 or later and the
+[Freerouting](https://github.com/freerouting/freerouting/releases) jar (give the jar location with `--jar` or `FREEROUTING_JAR`).
 
-## 作り方（Linux）
+## Building (Linux)
 
-1. ビルドに要るパッケージを入れる（Ubuntu/Debian。一覧は [patches/10.0.6/builddeps.txt](patches/10.0.6/builddeps.txt)）
-
-   ```
-   sudo apt install $(cat patches/10.0.6/builddeps.txt)     # 8.0.9 なら patches/8.0.9/notes/builddeps.txt
-   ```
-
-2. KiCad のソースを取ってきて改良を当てる（既定の場所は `~/src/kicad-<版>`）
+1. Install the build dependencies (Ubuntu/Debian. The list is in [patches/10.0.6/builddeps.txt](patches/10.0.6/builddeps.txt))
 
    ```
-   ./apply.sh 10.0.6        # または ./apply.sh 8.0.9
+   sudo apt install $(cat patches/10.0.6/builddeps.txt)     # for 8.0.9: patches/8.0.9/notes/builddeps.txt
    ```
 
-3. ビルドする（Ubuntu 24.04 で確かめた設定。8.0.9 なら 10.0.6 を 8.0.9 に読み替える）
+2. Fetch the KiCad source and apply the changes (default location is `~/src/kicad-<version>`)
+
+   ```
+   ./apply.sh 10.0.6        # or ./apply.sh 8.0.9
+   ```
+
+3. Build (settings verified on Ubuntu 24.04. For 8.0.9, replace 10.0.6 with 8.0.9)
 
    ```
    cmake -S ~/src/kicad-10.0.6 -B ~/src/build-10.0.6 -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -123,43 +127,43 @@ Ubuntu 24.04（x86_64）向けの tar.gz を、リリースに置いています
          pcbnew/_pcbnew.so s3d_plugin_vrml s3d_plugin_oce s3d_plugin_idf
    ```
 
-   `KICAD_BUILD_PNS_DEBUG_TOOL=ON` は kicad_route（`qa/tools/pns/`）を作るために要ります。
-   メモリ 7GB で `-j5` まで、フルビルドで 20〜30 分ほどです。インストールはせず、ビルドした場所から動かします
-   （`bin/` の入口が `KICAD_RUN_FROM_BUILD_DIR` などを設定します）。
+   `KICAD_BUILD_PNS_DEBUG_TOOL=ON` is needed to build kicad_route (`qa/tools/pns/`).
+   With 7 GB of memory, up to `-j5` works, and a full build takes about 20–30 minutes. Nothing is installed; it runs from the build directory
+   (the entry points in `bin/` set `KICAD_RUN_FROM_BUILD_DIR` and so on).
 
-4. `bin/` を PATH に入れる（または `bin/` の中身を `~/.local/bin` に置く）
+4. Add `bin/` to PATH (or put the contents of `bin/` in `~/.local/bin`)
 
    ```
    export PATH="$PWD/bin:$PATH"
    kicad-local help
    ```
 
-   ビルドした場所は `KICAD_LOCAL_BUILD` で指定します（既定は `~/src/build-10.0.6`。8.0.9 なら `export KICAD_LOCAL_BUILD=~/src/build-8.0.9`）。
-   ソースの場所を変えたときは `KICAD_LOCAL_SRC` を設定します。
-   部品ライブラリ（フットプリント・シンボル・3D モデル）は、システムに入れた本家の KiCad（同じ系列）のもの（`/usr/share/kicad`）を使います。
+   Set the build directory with `KICAD_LOCAL_BUILD` (default `~/src/build-10.0.6`; for 8.0.9, `export KICAD_LOCAL_BUILD=~/src/build-8.0.9`).
+   If you moved the source, set `KICAD_LOCAL_SRC`.
+   The part libraries (footprints, symbols, 3D models) come from the upstream KiCad (same series) installed on the system (`/usr/share/kicad`).
 
-## 試験
+## Tests
 
 ```
-kicad-local test        # = test/regress.sh（数十秒）
+kicad-local test        # = test/regress.sh (a few tens of seconds)
 ```
 
-KiCad 8.0.9 に付いてくるデモの基板（pic_programmer）と回路図（interf_u）で、配線の手順を流して結果を基準（`test/baseline/`）と比べ、
-道具ひとつずつの動作も確かめます。
+Using the demo board (pic_programmer) and schematic (interf_u) that ship with KiCad 8.0.9, it runs routing steps and compares the results with the baseline (`test/baseline/`),
+and also checks each tool individually.
 
-## フォルダ
+## Folders
 
-| 場所 | 中身 |
+| Location | Contents |
 |---|---|
-| `patches/10.0.6/` | KiCad 10.0.6 への改良（番号順のパッチ。本家の MR は作者の名前つき） |
-| `patches/8.0.9/` | KiCad 8.0.9 への改良。`ALL-combined.patch` が全部をまとめたもの。番号付きのパッチは来歴の記録 |
-| `bin/` | 入口（`kicad-local`、`kicad-route`、`kicad-gerber`、`kicad-cli-local`、`kicad-python`） |
-| `tools/` | Python の道具（review・lint・sch・sim・pcbsync・silkfix ほか） |
-| `test/` | 回帰試験 |
-| `package/` | 配布物を作るスクリプト（`linux.sh`：ビルドした場所から tar.gz を作る） |
-| `installer/` | Windows のインストーラー（NSIS） |
-| `docs/guide.md` | 手引き（使い方の流れ、最新版から機能を取り込むやり方、ハマりどころ） |
+| `patches/10.0.6/` | Changes for KiCad 10.0.6 (numbered patches; upstream MRs carry the author's name) |
+| `patches/8.0.9/` | Changes for KiCad 8.0.9. `ALL-combined.patch` combines them all; the numbered patches are a historical record |
+| `bin/` | Entry points (`kicad-local`, `kicad-route`, `kicad-gerber`, `kicad-cli-local`, `kicad-python`) |
+| `tools/` | Python tools (review, lint, sch, sim, pcbsync, silkfix, etc.) |
+| `test/` | Regression tests |
+| `package/` | Scripts that build the distribution (`linux.sh`: makes a tar.gz from the build directory) |
+| `installer/` | Windows installer (NSIS) |
+| `docs/guide.md` | Guide (workflow, how to bring in features from the latest version, pitfalls) |
 
-## ライセンス
+## License
 
-GPL-3.0-or-later（KiCad と同じ）。KiCad 本体は KiCad の開発者によるもので、本家から取り込んだ変更の作者は各パッチに記録しています。
+GPL-3.0-or-later (same as KiCad). KiCad itself is by the KiCad developers, and the authors of changes taken from upstream are recorded in each patch.

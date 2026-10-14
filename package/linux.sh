@@ -21,7 +21,7 @@ rm -rf "$dst"
 mkdir -p "$dst/build"
 
 # リポジトリの側（試験の出力と Python のキャッシュは除く）
-tar -C "$here" --exclude=__pycache__ --exclude=test/now -cf - bin tools test patches README.md LICENSE | tar -C "$dst" -xf -
+tar -C "$here" --exclude=__pycache__ --exclude=test/now -cf - bin tools test patches README.md README.ja.md README.zh-CN.md LICENSE | tar -C "$dst" -xf -
 
 # ビルドの側（ライブラリは実体とリンクの両方）
 files=(
