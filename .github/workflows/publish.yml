@@ -70,7 +70,9 @@ jobs:
               --notes "$([ -n "${{ inputs.run_id }}" ] && echo "$win")
           $([ -n "${{ inputs.linux_run_id }}" ] && echo "$lin")"
           files=()
-          while IFS= read -r -d '' f; do files+=("$f"); done < <(find out/windows -type f \( -name '*.exe' -o -name '*.zip' \) -print0 2>/dev/null)
+          # Windows 版にも Linux 版と同じく .sha256 を付ける
+          while IFS= read -r -d '' f; do (cd "$(dirname "$f")" && sha256sum "$(basename "$f")" > "$(basename "$f").sha256"); done < <(find out/windows -type f \( -name '*.exe' -o -name '*.zip' \) -print0 2>/dev/null)
+          while IFS= read -r -d '' f; do files+=("$f"); done < <(find out/windows -type f \( -name '*.exe' -o -name '*.zip' -o -name '*.exe.sha256' -o -name '*.zip.sha256' \) -print0 2>/dev/null)
           while IFS= read -r -d '' f; do files+=("$f"); done < <(find out/linux -type f \( -name "kicad-ja-plus-$ver-linux-x86_64.tar.gz" -o -name "kicad-ja-plus-$ver-linux-x86_64.tar.gz.sha256" \) -print0 2>/dev/null)
           [ ${#files[@]} -gt 0 ] || { echo "載せるファイルが無い"; exit 1; }
           printf '載せる: %s\n' "${files[@]}"
