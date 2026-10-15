@@ -260,7 +260,9 @@ jobs:
           makensis -DVERSION="$KV" -DSTAGE="$(cygpath -w "$STAGE")" -DOUTFILE="$(cygpath -w "$GITHUB_WORKSPACE/out/$name-installer.exe")" installer/kicad-ja-plus.nsi
           ls -la out
           # ZIP に Freerouting と起動の入口が入っていること
-          unzip -l "out/$name.zip" | grep -E "freerouting/freerouting.jar|freerouting/jre/bin/java.exe|freerouting/LICENSE-freerouting.txt|bin/freerouting.cmd" | tee /dev/stderr | wc -l | grep -qx 4
+          found=$(unzip -l "out/$name.zip" | grep -E "freerouting/freerouting.jar|freerouting/jre/bin/java.exe|freerouting/LICENSE-freerouting.txt|bin/freerouting.cmd" || true)
+          echo "$found"
+          [ "$(printf '%s\n' "$found" | grep -c .)" -eq 4 ] || { echo "Freerouting の同梱が足りない"; exit 1; }
 
       - uses: actions/upload-artifact@v4
         with:
