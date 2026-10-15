@@ -84,7 +84,7 @@ kicad-local review 新しい版 前の版 --out 確認/        # ERC・DRC・3D�
 Ubuntu 24.04（x86_64。WSL2 の Ubuntu も可）向けの tar.gz を、リリースに 10.0.6 と 8.0.9 の両方置いています
 （`kicad-ja-plus-<版>-linux-x86_64.tar.gz` と `.sha256`）。
 中身は改良した kicad-cli・画面（`kicad`・`pcbnew`・`eeschema` ほか）・kiface・pcbnew の Python モジュール・アイコン・翻訳（日本語ほか）・
-画面なしの道具、それに **AI チャット用の Python と Claude Agent SDK（`build/ai-runtime`）** です。
+画面なしの道具、それに **AI チャット用の Python と Claude Agent SDK（`build/ai-runtime`）**、**Freerouting とそれ専用の Java（`build/freerouting`）** です。
 wxWidgets・OpenCASCADE・ngspice などの共通の部品と、部品ライブラリ・3D モデルは、システムに入れた本家の KiCad を使います。
 
 1. 本家の KiCad を、**同じ系列の** PPA から入れる
@@ -113,8 +113,11 @@ wxWidgets・OpenCASCADE・ngspice などの共通の部品と、部品ライブ�
 - 本家の KiCad を別の系列（例: 10.0.6 版に KiCad 8 の PPA）にしたときは、足りない共通の部品を `sudo apt install $(cat DEPENDS-apt.txt)` で入れます。
   ただし `kicad-local test` などはシステムの `kicad-cli` と比べるので、同じ系列でないと失敗します。
 
-全体の自動配線（`kicad-local autoroute`）を使うときだけ、Java 21 以降と
-[Freerouting](https://github.com/freerouting/freerouting/releases) の jar が要ります（jar の場所は `--jar` か `FREEROUTING_JAR`）。
+全体の自動配線（`kicad-local autoroute`）の [Freerouting](https://github.com/freerouting/freerouting) 2.4.1（GPL-3.0）と、
+それだけを動かす最小の Java（Temurin 25 から jlink）も同梱しています（`build/freerouting/`。出どころと使用許諾は中の README.txt）。
+Java の入っていない環境でもそのまま動きます。別の jar や java を使うときは `--jar`・`FREEROUTING_JAR`・`FREEROUTING_JAVA` で指定します。
+Windows 版にも同じものが `<KiCad>\freerouting\` にあり、`<KiCad>\bin\freerouting.cmd`（スタートメニューの Freerouting）で起動できます。
+ソースから作ったときは、Java 25 以降と Freerouting の jar を別に用意します（jar の場所は `--jar` か `FREEROUTING_JAR`）。
 
 ## 作り方（Linux）
 

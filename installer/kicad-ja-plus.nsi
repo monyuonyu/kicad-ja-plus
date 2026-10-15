@@ -23,6 +23,10 @@ Section "Install"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   CreateDirectory "$SMPROGRAMS\KiCad-ja-plus ${VERSION}"
   CreateShortcut "$SMPROGRAMS\KiCad-ja-plus ${VERSION}\KiCad.lnk" "$INSTDIR\bin\kicad.exe"
+!if /FileExists "${STAGE}\freerouting\freerouting.jar"
+  ; 同梱の Freerouting（全体の自動配線）を、同梱の Java で（画面あり）
+  CreateShortcut "$SMPROGRAMS\KiCad-ja-plus ${VERSION}\Freerouting.lnk" "$INSTDIR\freerouting\jre\bin\javaw.exe" '-jar "$INSTDIR\freerouting\freerouting.jar"'
+!endif
   CreateShortcut "$SMPROGRAMS\KiCad-ja-plus ${VERSION}\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
   WriteRegStr HKLM "${REGKEY}" "DisplayName" "KiCad (kicad-ja-plus) ${VERSION}"
   WriteRegStr HKLM "${REGKEY}" "DisplayVersion" "${VERSION}"

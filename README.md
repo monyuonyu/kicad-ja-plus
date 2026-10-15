@@ -86,7 +86,7 @@ No feature that changes the file format is included.
 tar.gz files for Ubuntu 24.04 (x86_64; Ubuntu on WSL2 works too) are on the Releases page for both 10.0.6 and 8.0.9
 (`kicad-ja-plus-<version>-linux-x86_64.tar.gz` and `.sha256`).
 They contain the improved kicad-cli, the GUI (`kicad`, `pcbnew`, `eeschema` and others), the kifaces, the pcbnew Python module, icons,
-translations (Japanese and others), the headless tools, and **the Python and Claude Agent SDK for the AI chat (`build/ai-runtime`)**.
+translations (Japanese and others), the headless tools, **the Python and Claude Agent SDK for the AI chat (`build/ai-runtime`)**, and **Freerouting with its own Java runtime (`build/freerouting`)**.
 Shared components such as wxWidgets, OpenCASCADE and ngspice, and the part libraries and 3D models, come from the upstream KiCad installed on the system.
 
 1. Install upstream KiCad **of the same series** from the PPA
@@ -115,8 +115,11 @@ Shared components such as wxWidgets, OpenCASCADE and ngspice, and the part libra
 - If the upstream KiCad is from another series (e.g. the KiCad 8 PPA with the 10.0.6 package), install the missing shared components with
   `sudo apt install $(cat DEPENDS-apt.txt)`. `kicad-local test` and some tools compare against the system `kicad-cli`, so they fail unless the series match.
 
-Only whole-board autorouting (`kicad-local autoroute`) needs Java 21 or later and the
-[Freerouting](https://github.com/freerouting/freerouting/releases) jar (give the jar location with `--jar` or `FREEROUTING_JAR`).
+For whole-board autorouting (`kicad-local autoroute`), [Freerouting](https://github.com/freerouting/freerouting) 2.4.1 (GPL-3.0)
+and a minimal Java runtime just for it (jlinked from Temurin 25) are bundled (`build/freerouting/`; origin and licenses in its README.txt).
+It works on systems without Java. To use another jar or java, set `--jar`, `FREEROUTING_JAR` or `FREEROUTING_JAVA`.
+The Windows version has the same in `<KiCad>\freerouting\`, started with `<KiCad>\bin\freerouting.cmd` (Freerouting in the Start menu).
+When building from source, provide Java 25 or later and the Freerouting jar yourself (jar location with `--jar` or `FREEROUTING_JAR`).
 
 ## Building (Linux)
 

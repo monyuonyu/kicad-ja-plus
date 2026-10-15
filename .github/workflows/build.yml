@@ -39,10 +39,11 @@ jobs:
           # 画面の確かめを日本語で
           sudo locale-gen ja_JP.UTF-8
 
+      # Freerouting 2.4.1 は Java 25 以降（クラスファイルの版 69）。配布物の最小の Java も、この JDK から jlink で作る（JAVA_HOME）
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "25"
 
       - name: Get Freerouting (for kicad-local autoroute)
         run: |

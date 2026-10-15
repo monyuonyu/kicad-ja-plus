@@ -86,7 +86,7 @@ kicad-local review 新しい版 前の版 --out 確認/        # 一次完成 ER
 Releases 中提供了面向 Ubuntu 24.04（x86_64，WSL2 中的 Ubuntu 也可）的 tar.gz，10.0.6 和 8.0.9 两个版本都有
 （`kicad-ja-plus-<版本>-linux-x86_64.tar.gz` 和 `.sha256`）。
 其中包含改进后的 kicad-cli、图形界面（`kicad`、`pcbnew`、`eeschema` 等）、kiface、pcbnew 的 Python 模块、图标、翻译（日语等）、
-无界面工具，以及 **AI 聊天所用的 Python 和 Claude Agent SDK（`build/ai-runtime`）**。
+无界面工具，**AI 聊天所用的 Python 和 Claude Agent SDK（`build/ai-runtime`）**，以及 **Freerouting 及其专用 Java（`build/freerouting`）**。
 wxWidgets、OpenCASCADE、ngspice 等公共组件以及元件库、3D 模型，使用系统中安装的上游 KiCad。
 
 1. 从 PPA 安装**同一系列**的上游 KiCad
@@ -115,8 +115,11 @@ wxWidgets、OpenCASCADE、ngspice 等公共组件以及元件库、3D 模型，�
 - 如果上游 KiCad 是其他系列（例如 10.0.6 版配 KiCad 8 的 PPA），请用 `sudo apt install $(cat DEPENDS-apt.txt)` 安装缺少的公共组件。
   不过 `kicad-local test` 等会与系统的 `kicad-cli` 比较，系列不同时会失败。
 
-只有整板自动布线（`kicad-local autoroute`）需要 Java 21 或更高版本以及
-[Freerouting](https://github.com/freerouting/freerouting/releases) 的 jar（jar 的位置用 `--jar` 或 `FREEROUTING_JAR` 指定）。
+整板自动布线（`kicad-local autoroute`）所用的 [Freerouting](https://github.com/freerouting/freerouting) 2.4.1（GPL-3.0）
+以及仅用于运行它的最小 Java（由 Temurin 25 经 jlink 生成）也已附带（`build/freerouting/`，来源与许可证见其中的 README.txt）。
+没有安装 Java 的环境也能直接使用。若要使用其他 jar 或 java，请用 `--jar`、`FREEROUTING_JAR`、`FREEROUTING_JAVA` 指定。
+Windows 版在 `<KiCad>\freerouting\` 中也有相同内容，可用 `<KiCad>\bin\freerouting.cmd`（开始菜单中的 Freerouting）启动。
+从源码构建时，请自行准备 Java 25 或更高版本以及 Freerouting 的 jar（jar 的位置用 `--jar` 或 `FREEROUTING_JAR` 指定）。
 
 ## 构建（Linux）
 

@@ -31,7 +31,7 @@ jobs:
           msystem: UCRT64
           update: true
           install: >-
-            git patch zip
+            git patch zip unzip
             mingw-w64-ucrt-x86_64-cc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-ccache mingw-w64-ucrt-x86_64-nsis
             mingw-w64-ucrt-x86_64-boost mingw-w64-ucrt-x86_64-swig
@@ -216,6 +216,42 @@ jobs:
           $STAGE/bin/kicad-cli.exe pcb export stats -o "$GITHUB_WORKSPACE/stats.txt" pic_programmer.kicad_pcb
           head -20 "$GITHUB_WORKSPACE/stats.txt"
 
+      # Freerouting（全体の自動配線）と、それだけを動かす最小の Java（jlink。JDK 25 以降が要る）を <KiCad>/freerouting に入れる。
+      # 起動は <KiCad>/bin/freerouting.cmd（引数なしなら画面、引数があれば画面なしの命令として）
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Bundle Freerouting
+        run: |
+          FR_CACHE="$(cygpath -u "$RUNNER_TEMP")/frcache" package/freerouting.sh "$STAGE/freerouting" "$JAVA_HOME"
+          # cmd.exe は .cmd を ANSI のコードページで読むので、中身は ASCII だけにする
+          printf '%s\r\n' \
+            '@echo off' \
+            'rem Freerouting (autorouter) with the bundled Java. No arguments: GUI. Otherwise the arguments are passed on,' \
+            'rem e.g. freerouting.cmd -de board.dsn -do result.ses -mp 20 --gui.enabled=false' \
+            'setlocal' \
+            'set "FR=%~dp0..\freerouting"' \
+            'if "%~1"=="" (' \
+            '  start "" "%FR%\jre\bin\javaw.exe" -jar "%FR%\freerouting.jar"' \
+            ') else (' \
+            '  "%FR%\jre\bin\java.exe" -jar "%FR%\freerouting.jar" %*' \
+            ')' > "$STAGE/bin/freerouting.cmd"
+          cat "$STAGE/bin/freerouting.cmd"
+
+      - name: Smoke test (Freerouting through the launcher)
+        shell: pwsh
+        run: |
+          # 起動の入口（bin\freerouting.cmd）から、同梱の Java で、配線を 1 本消した基板（DSN）を引き直す
+          $ses = "$env:RUNNER_TEMP/fr.ses"
+          & "$env:STAGE/bin/freerouting.cmd" -de "$PWD/test/freerouting/unrouted.dsn" -do $ses -mp 3 --gui.enabled=false
+          if (-not (Test-Path $ses)) { throw "Freerouting が結果（SES）を出さない" }
+          $wires = (Select-String -Path $ses -Pattern '\(wire').Count
+          "SES の配線: $wires 本"
+          if ($wires -lt 100) { throw "SES の配線が少ない: $wires" }
+          "{0:N0} MB" -f ((Get-ChildItem "$env:STAGE/freerouting" -Recurse | Measure-Object Length -Sum).Sum / 1MB)
+
       - name: Package (ZIP and installer)
         run: |
           name="kicad-ja-plus-${KV}-windows-x86_64"
@@ -223,6 +259,8 @@ jobs:
           (cd "$STAGE" && zip -qr "$GITHUB_WORKSPACE/out/$name.zip" .)
           makensis -DVERSION="$KV" -DSTAGE="$(cygpath -w "$STAGE")" -DOUTFILE="$(cygpath -w "$GITHUB_WORKSPACE/out/$name-installer.exe")" installer/kicad-ja-plus.nsi
           ls -la out
+          # ZIP に Freerouting と起動の入口が入っていること
+          unzip -l "out/$name.zip" | grep -E "freerouting/freerouting.jar|freerouting/jre/bin/java.exe|freerouting/LICENSE-freerouting.txt|bin/freerouting.cmd" | tee /dev/stderr | wc -l | grep -qx 4
 
       - uses: actions/upload-artifact@v4
         with:
