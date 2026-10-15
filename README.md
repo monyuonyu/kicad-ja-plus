@@ -63,7 +63,7 @@ In the PCB editor, View ("表示") → Panels ("パネル") → AI Chat opens an
   Changes that were run can be reverted with a single Undo ("元に戻す"), and changes from a run that ended in an error are rolled back.
 - DRC and images work by saving a copy of the board and running kicad-cli on it (the open board and its file are not changed).
 - It uses **your own Anthropic API key**. You are asked for it the first time, and it is stored in the OS key store (Credential Manager on Windows, etc.).
-- **The Windows version bundles the Python and Claude Agent SDK for the AI in the installer** (`<KiCad>/ai-runtime`). No setup or download is needed
+- **The Windows version and the Linux tar.gz bundle the Python and Claude Agent SDK for the AI** (`<KiCad>/ai-runtime`; `build/ai-runtime` on Linux). No setup or download is needed
   (the conversation with the AI itself needs an Internet connection).
 - When built from source, the first time you open it you are asked whether to create a dedicated Python environment (needs Python 3.10 or later and an Internet connection).
   To set it up by hand: `python3 <KiCad の scripting>/kicad_ai/setup_ai.py` (`<KiCad の scripting>` = KiCad's scripting directory).
@@ -83,23 +83,37 @@ No feature that changes the file format is included.
 
 ## Installing (Linux, prebuilt)
 
-A tar.gz for Ubuntu 24.04 (x86_64) is available on the Releases page.
+tar.gz files for Ubuntu 24.04 (x86_64; Ubuntu on WSL2 works too) are on the Releases page for both 10.0.6 and 8.0.9
+(`kicad-ja-plus-<version>-linux-x86_64.tar.gz` and `.sha256`).
+They contain the improved kicad-cli, the GUI (`kicad`, `pcbnew`, `eeschema` and others), the kifaces, the pcbnew Python module, icons,
+translations (Japanese and others), the headless tools, and **the Python and Claude Agent SDK for the AI chat (`build/ai-runtime`)**.
+Shared components such as wxWidgets, OpenCASCADE and ngspice, and the part libraries and 3D models, come from the upstream KiCad installed on the system.
 
-1. Install upstream KiCad 10 from the PPA. The part libraries and the shared components such as wxWidgets and OpenCASCADE come from it.
+1. Install upstream KiCad **of the same series** from the PPA
 
    ```
-   sudo add-apt-repository ppa:kicad/kicad-10.0-releases
+   sudo add-apt-repository ppa:kicad/kicad-10.0-releases     # for 8.0.9: ppa:kicad/kicad-8.0-releases
    sudo apt install kicad python3-numpy python3-matplotlib python3-pil
    ```
 
 2. Extract it anywhere and add `bin/` to PATH
 
    ```
+   sha256sum -c kicad-ja-plus-10.0.6-linux-x86_64.tar.gz.sha256
    tar xzf kicad-ja-plus-10.0.6-linux-x86_64.tar.gz
    export PATH="$PWD/kicad-ja-plus-10.0.6-linux-x86_64/bin:$PATH"
    kicad-local help
+   kicad-ja-plus-10.0.6-linux-x86_64/package/check-linux.sh   # checks the contents and that things run (tens of seconds)
    kicad-local test        # regression tests. If everything is OK, the installation is correct
    ```
+
+3. Start the GUI with `pcbnew-ja` (PCB editor), `eeschema-ja` (schematic editor) or `kicad-ja` (project manager)
+   (on WSL2 it appears through WSLg). From Python: `kicad-python -c "import pcbnew; print(pcbnew.Version())"`.
+
+- The launchers in `bin/` use the `build/` inside the extracted folder automatically. To use them from another `bin/` (e.g. a git clone of this repository),
+  set `export KICAD_LOCAL_BUILD=<extracted folder>/build`.
+- If the upstream KiCad is from another series (e.g. the KiCad 8 PPA with the 10.0.6 package), install the missing shared components with
+  `sudo apt install $(cat DEPENDS-apt.txt)`. `kicad-local test` and some tools compare against the system `kicad-cli`, so they fail unless the series match.
 
 Only whole-board autorouting (`kicad-local autoroute`) needs Java 21 or later and the
 [Freerouting](https://github.com/freerouting/freerouting/releases) jar (give the jar location with `--jar` or `FREEROUTING_JAR`).
@@ -157,10 +171,10 @@ and also checks each tool individually.
 |---|---|
 | `patches/10.0.6/` | Changes for KiCad 10.0.6 (numbered patches; upstream MRs carry the author's name) |
 | `patches/8.0.9/` | Changes for KiCad 8.0.9. `ALL-combined.patch` combines them all; the numbered patches are a historical record |
-| `bin/` | Entry points (`kicad-local`, `kicad-route`, `kicad-gerber`, `kicad-cli-local`, `kicad-python`) |
+| `bin/` | Entry points (`kicad-local`, `kicad-route`, `kicad-gerber`, `kicad-cli-local`, `kicad-python`) and GUI launchers (`pcbnew-ja`, `eeschema-ja`, `kicad-ja`) |
 | `tools/` | Python tools (review, lint, sch, sim, pcbsync, silkfix, etc.) |
 | `test/` | Regression tests |
-| `package/` | Scripts that build the distribution (`linux.sh`: makes a tar.gz from the build directory) |
+| `package/` | Scripts that build the distribution (`linux.sh`: makes a tar.gz from the build directory; `check-linux.sh`: checks an extracted package) |
 | `installer/` | Windows installer (NSIS) |
 | `docs/guide.md` | Guide (workflow, how to bring in features from the latest version, pitfalls) |
 

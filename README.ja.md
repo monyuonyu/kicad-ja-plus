@@ -61,7 +61,7 @@ kicad-local review 新しい版 前の版 --out 確認/        # ERC・DRC・3D�
   実行した変更は「元に戻す」1 回で戻せ、エラーになった回の変更は取り消されます。
 - DRC と画像は、基板の写しを保存して kicad-cli にかけます（開いている基板とファイルは変えません）。
 - 使うのは **ご自身の Anthropic の API キー** です。最初に聞かれ、OS の鍵保管庫（Windows の資格情報マネージャーなど）に保存されます。
-- **Windows 版は、AI 用の Python と Claude Agent SDK をインストーラーに同梱しています**（`<KiCad>/ai-runtime`）。準備もダウンロードも要りません
+- **Windows 版と Linux 版（tar.gz）は、AI 用の Python と Claude Agent SDK を同梱しています**（`<KiCad>/ai-runtime`、Linux 版は `build/ai-runtime`）。準備もダウンロードも要りません
   （AI との会話そのものには、インターネットが要ります）。
 - ソースからビルドしたときは、初めて開いたときに専用の Python の環境を作るかを聞かれます（Python 3.10 以降とインターネットが要ります）。
   手で準備するなら `python3 <KiCad の scripting>/kicad_ai/setup_ai.py`。
@@ -81,23 +81,37 @@ kicad-local review 新しい版 前の版 --out 確認/        # ERC・DRC・3D�
 
 ## 入れ方（Linux、ビルド済み）
 
-Ubuntu 24.04（x86_64）向けの tar.gz を、リリースに置いています。
+Ubuntu 24.04（x86_64。WSL2 の Ubuntu も可）向けの tar.gz を、リリースに 10.0.6 と 8.0.9 の両方置いています
+（`kicad-ja-plus-<版>-linux-x86_64.tar.gz` と `.sha256`）。
+中身は改良した kicad-cli・画面（`kicad`・`pcbnew`・`eeschema` ほか）・kiface・pcbnew の Python モジュール・アイコン・翻訳（日本語ほか）・
+画面なしの道具、それに **AI チャット用の Python と Claude Agent SDK（`build/ai-runtime`）** です。
+wxWidgets・OpenCASCADE・ngspice などの共通の部品と、部品ライブラリ・3D モデルは、システムに入れた本家の KiCad を使います。
 
-1. 本家の KiCad 10 を PPA から入れる。部品ライブラリと、wxWidgets・OpenCASCADE などの共通の部品は、これを使います。
+1. 本家の KiCad を、**同じ系列の** PPA から入れる
 
    ```
-   sudo add-apt-repository ppa:kicad/kicad-10.0-releases
+   sudo add-apt-repository ppa:kicad/kicad-10.0-releases     # 8.0.9 なら ppa:kicad/kicad-8.0-releases
    sudo apt install kicad python3-numpy python3-matplotlib python3-pil
    ```
 
 2. 好きな場所に展開して、`bin/` を PATH に入れる
 
    ```
+   sha256sum -c kicad-ja-plus-10.0.6-linux-x86_64.tar.gz.sha256
    tar xzf kicad-ja-plus-10.0.6-linux-x86_64.tar.gz
    export PATH="$PWD/kicad-ja-plus-10.0.6-linux-x86_64/bin:$PATH"
    kicad-local help
+   kicad-ja-plus-10.0.6-linux-x86_64/package/check-linux.sh   # 中身と動作の確かめ（数十秒）
    kicad-local test        # 回帰試験。全部 OK なら入れ方は正しい
    ```
+
+3. 画面は `pcbnew-ja`（基板エディタ）・`eeschema-ja`（回路図エディタ）・`kicad-ja`（プロジェクトマネージャー）で起動します
+   （WSL2 は WSLg の画面に出ます）。Python からは `kicad-python -c "import pcbnew; print(pcbnew.Version())"`。
+
+- 入口（`bin/`）は、展開した中の `build/` を自動で使います。ほかの場所の `bin/`（git で取ったこのリポジトリなど）から使うときは
+  `export KICAD_LOCAL_BUILD=<展開した場所>/build` を設定します。
+- 本家の KiCad を別の系列（例: 10.0.6 版に KiCad 8 の PPA）にしたときは、足りない共通の部品を `sudo apt install $(cat DEPENDS-apt.txt)` で入れます。
+  ただし `kicad-local test` などはシステムの `kicad-cli` と比べるので、同じ系列でないと失敗します。
 
 全体の自動配線（`kicad-local autoroute`）を使うときだけ、Java 21 以降と
 [Freerouting](https://github.com/freerouting/freerouting/releases) の jar が要ります（jar の場所は `--jar` か `FREEROUTING_JAR`）。
@@ -155,10 +169,10 @@ KiCad 8.0.9 に付いてくるデモの基板（pic_programmer）と回路図（
 |---|---|
 | `patches/10.0.6/` | KiCad 10.0.6 への改良（番号順のパッチ。本家の MR は作者の名前つき） |
 | `patches/8.0.9/` | KiCad 8.0.9 への改良。`ALL-combined.patch` が全部をまとめたもの。番号付きのパッチは来歴の記録 |
-| `bin/` | 入口（`kicad-local`、`kicad-route`、`kicad-gerber`、`kicad-cli-local`、`kicad-python`） |
+| `bin/` | 入口（`kicad-local`、`kicad-route`、`kicad-gerber`、`kicad-cli-local`、`kicad-python`）と画面の起動（`pcbnew-ja`・`eeschema-ja`・`kicad-ja`） |
 | `tools/` | Python の道具（review・lint・sch・sim・pcbsync・silkfix ほか） |
 | `test/` | 回帰試験 |
-| `package/` | 配布物を作るスクリプト（`linux.sh`：ビルドした場所から tar.gz を作る） |
+| `package/` | 配布物を作るスクリプト（`linux.sh`：ビルドした場所から tar.gz を作る、`check-linux.sh`：展開した物の確かめ） |
 | `installer/` | Windows のインストーラー（NSIS） |
 | `docs/guide.md` | 手引き（使い方の流れ、最新版から機能を取り込むやり方、ハマりどころ） |
 

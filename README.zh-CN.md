@@ -63,7 +63,7 @@ kicad-local review 新しい版 前の版 --out 確認/        # 一次完成 ER
   已运行的修改可以通过一次撤销（“元に戻す”）恢复，出错那一次的修改会被回滚。
 - DRC 和图像是先保存电路板的副本，再交给 kicad-cli 处理（不会改动当前打开的电路板及其文件）。
 - 使用的是**你自己的 Anthropic API 密钥**。首次使用时会询问，并保存在操作系统的密钥存储中（如 Windows 的凭据管理器）。
-- **Windows 版的安装程序中已附带 AI 所需的 Python 和 Claude Agent SDK**（`<KiCad>/ai-runtime`）。无需准备，也无需下载
+- **Windows 版和 Linux 版（tar.gz）已附带 AI 所需的 Python 和 Claude Agent SDK**（`<KiCad>/ai-runtime`，Linux 版为 `build/ai-runtime`）。无需准备，也无需下载
   （与 AI 的对话本身需要联网）。
 - 从源码构建时，首次打开会询问是否创建专用的 Python 环境（需要 Python 3.10 或更高版本以及网络连接）。
   如需手动准备：`python3 <KiCad の scripting>/kicad_ai/setup_ai.py`（`<KiCad の scripting>` 指 KiCad 的 scripting 目录）。
@@ -83,23 +83,37 @@ kicad-local review 新しい版 前の版 --out 確認/        # 一次完成 ER
 
 ## 安装（Linux，预编译版）
 
-Releases 中提供了面向 Ubuntu 24.04（x86_64）的 tar.gz。
+Releases 中提供了面向 Ubuntu 24.04（x86_64，WSL2 中的 Ubuntu 也可）的 tar.gz，10.0.6 和 8.0.9 两个版本都有
+（`kicad-ja-plus-<版本>-linux-x86_64.tar.gz` 和 `.sha256`）。
+其中包含改进后的 kicad-cli、图形界面（`kicad`、`pcbnew`、`eeschema` 等）、kiface、pcbnew 的 Python 模块、图标、翻译（日语等）、
+无界面工具，以及 **AI 聊天所用的 Python 和 Claude Agent SDK（`build/ai-runtime`）**。
+wxWidgets、OpenCASCADE、ngspice 等公共组件以及元件库、3D 模型，使用系统中安装的上游 KiCad。
 
-1. 从 PPA 安装上游的 KiCad 10。元件库以及 wxWidgets、OpenCASCADE 等公共组件都使用它提供的。
+1. 从 PPA 安装**同一系列**的上游 KiCad
 
    ```
-   sudo add-apt-repository ppa:kicad/kicad-10.0-releases
+   sudo add-apt-repository ppa:kicad/kicad-10.0-releases     # 8.0.9 则用 ppa:kicad/kicad-8.0-releases
    sudo apt install kicad python3-numpy python3-matplotlib python3-pil
    ```
 
 2. 解压到任意位置，并把 `bin/` 加入 PATH
 
    ```
+   sha256sum -c kicad-ja-plus-10.0.6-linux-x86_64.tar.gz.sha256
    tar xzf kicad-ja-plus-10.0.6-linux-x86_64.tar.gz
    export PATH="$PWD/kicad-ja-plus-10.0.6-linux-x86_64/bin:$PATH"
    kicad-local help
+   kicad-ja-plus-10.0.6-linux-x86_64/package/check-linux.sh   # 检查内容和运行情况（几十秒）
    kicad-local test        # 回归测试。全部 OK 即说明安装正确
    ```
+
+3. 图形界面用 `pcbnew-ja`（PCB 编辑器）、`eeschema-ja`（原理图编辑器）、`kicad-ja`（项目管理器）启动
+   （WSL2 中通过 WSLg 显示）。在 Python 中：`kicad-python -c "import pcbnew; print(pcbnew.Version())"`。
+
+- `bin/` 中的入口会自动使用解压目录中的 `build/`。若从其他位置的 `bin/`（例如 git 克隆的本仓库）使用，
+  请设置 `export KICAD_LOCAL_BUILD=<解压目录>/build`。
+- 如果上游 KiCad 是其他系列（例如 10.0.6 版配 KiCad 8 的 PPA），请用 `sudo apt install $(cat DEPENDS-apt.txt)` 安装缺少的公共组件。
+  不过 `kicad-local test` 等会与系统的 `kicad-cli` 比较，系列不同时会失败。
 
 只有整板自动布线（`kicad-local autoroute`）需要 Java 21 或更高版本以及
 [Freerouting](https://github.com/freerouting/freerouting/releases) 的 jar（jar 的位置用 `--jar` 或 `FREEROUTING_JAR` 指定）。
@@ -157,10 +171,10 @@ kicad-local test        # = test/regress.sh（几十秒）
 |---|---|
 | `patches/10.0.6/` | 针对 KiCad 10.0.6 的改进（按编号排列的补丁；上游的 MR 带有作者姓名） |
 | `patches/8.0.9/` | 针对 KiCad 8.0.9 的改进。`ALL-combined.patch` 是全部合并后的补丁，带编号的补丁是历史记录 |
-| `bin/` | 入口（`kicad-local`、`kicad-route`、`kicad-gerber`、`kicad-cli-local`、`kicad-python`） |
+| `bin/` | 入口（`kicad-local`、`kicad-route`、`kicad-gerber`、`kicad-cli-local`、`kicad-python`）及图形界面启动（`pcbnew-ja`、`eeschema-ja`、`kicad-ja`） |
 | `tools/` | Python 工具（review、lint、sch、sim、pcbsync、silkfix 等） |
 | `test/` | 回归测试 |
-| `package/` | 制作发行包的脚本（`linux.sh`：从构建目录生成 tar.gz） |
+| `package/` | 制作发行包的脚本（`linux.sh`：从构建目录生成 tar.gz；`check-linux.sh`：检查解压后的包） |
 | `installer/` | Windows 安装程序（NSIS） |
 | `docs/guide.md` | 指南（使用流程、从最新版本引入功能的方法、常见陷阱） |
 
