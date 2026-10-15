@@ -8,13 +8,15 @@
 #     kicad-cli、kicad_route、kicad_gerber、画面（kicad・pcbnew・eeschema ほか）、kiface、
 #     pcbnew の Python モジュール（_pcbnew.so と pcbnew.py）、3D の読み込み、共通のライブラリ、
 #     アイコン（resources/images.tar.gz）、翻訳（translation/<言語>/kicad.mo）、
-#     AI チャットの仲介役（scripting/kicad_ai）と AI 用の Python（ai-runtime。版を固定した Python と Claude Agent SDK）
+#     AI チャットの仲介役（scripting/kicad_ai）と AI 用の Python（ai-runtime。版を固定した Python と Claude Agent SDK）、
+#     Freerouting と、それだけを動かす最小の Java（freerouting/。package/freerouting.sh）
 # 共通のライブラリの探し先は $ORIGIN からの相対にする（patchelf）ので、どこに展開しても動く。
 # wxWidgets・OpenCASCADE・ngspice などと部品ライブラリは、システムに入れた本家の KiCad（同じ系列の PPA）のものを使う。
 # システムから使うライブラリの出どころ（apt のパッケージ名）は DEPENDS-apt.txt に書き出す。
 #
 # 環境変数:
 #   KJP_AI_RUNTIME=skip   AI 用の Python を入れない（既定は、仲介役のある版なら入れる。ダウンロードが要る）
+#   KJP_FREEROUTING=skip  Freerouting を入れない（既定は入れる。JDK 25 以降が要る: KJP_JDK か JAVA_HOME）
 #   KJP_ALLOW_NO_GUI=1    画面・アイコン・翻訳が無くても止めない（kicad-cli などだけのビルドから作るとき）
 #   PATCHELF              patchelf の場所
 set -euo pipefail
@@ -157,6 +159,12 @@ if [ -f "$req" ] && [ "${KJP_AI_RUNTIME:-auto}" != skip ]; then
   "$claude" --version
 fi
 
+# ---- Freerouting（全体の自動配線）と、それだけを動かす最小の Java。置き場は <build>/freerouting（kicad-local autoroute が探す）
+# jlink のできる JDK 25 以降が要る（KJP_JDK か JAVA_HOME）。KJP_FREEROUTING=skip で入れない
+if [ "${KJP_FREEROUTING:-auto}" != skip ]; then
+  FR_CACHE=$out/.cache "$here/package/freerouting.sh" "$dst/build/freerouting" "${KJP_JDK:-${JAVA_HOME:-}}"
+fi
+
 {
   echo "版: $ver"
   echo "元: $(git -C "$here" describe --always --dirty 2>/dev/null || echo '?')"
@@ -164,6 +172,7 @@ fi
   echo "作った環境: $(. /etc/os-release; echo "$PRETTY_NAME") $(uname -m)"
   command -v dpkg-query >/dev/null && echo "使った本家の KiCad（PPA）: $(dpkg-query -W -f '${Version}' kicad 2>/dev/null || echo '?')"
   echo "AI 用の Python: $([ -d "$dst/build/ai-runtime" ] && "$dst/build/ai-runtime/bin/python3" -V || echo なし)"
+  echo "Freerouting: $([ -f "$dst/build/freerouting/freerouting.jar" ] && head -1 "$dst/build/freerouting/README.txt" || echo なし)"
   if [ ${#missing[@]} -gt 0 ]; then echo "入っていないもの: ${missing[*]}"; fi
 } > "$dst/BUILD_INFO.txt"
 

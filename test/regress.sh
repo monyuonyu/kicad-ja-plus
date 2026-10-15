@@ -89,14 +89,20 @@ chk "kicad-local why(キープアウトが塞いでいると見分ける)" "kica
 chk "kicad-local view(注釈つきの画像。未配線とキープアウトの基板で印が付く)" "kicad-local view now/keepout.kicad_pcb -o now/view.png --drc --ref --net 'Net-(C5-Pad1)' --json > now/view.json && test -s now/view.png && python3 -c \"import json; d=json.load(open('now/view.json')); assert any(m['type']=='unconnected_items' for m in d['marks'])\""
 chk "kicad-local erc --json(要確認があれば終了コード 1)" "kicad-local erc sch/interf_u.kicad_sch --json > now/erc.json; rc=\$?; python3 -c \"import json,sys; d=json.load(open('now/erc.json')); sys.exit(0 if (rc:=int('\$rc'))==(0 if d['ok'] else 1) else 1)\""
 # 全体の自動配線（Freerouting が要る。無ければ飛ばす）: 配線を 1 本消した基板を引き直して未配線 0
+# 配布版に同梱したもの（<build>/freerouting）なら --jar を付けず、kicad-local autoroute が自分で見つけることも確かめる
 fr_jar=""
-for c in "${FREEROUTING_JAR:-}" ~/.local/share/kicad-ja-plus/freerouting.jar ~/.local/share/freerouting/freerouting.jar ~/cad-mcp-lab/tools/freerouting/freerouting-2.4.1.jar; do
+fr_opt=""
+if [ -z "${FREEROUTING_JAR:-}" ] && [ -f "$KICAD_LOCAL_BUILD/freerouting/freerouting.jar" ]; then
+  fr_jar=$KICAD_LOCAL_BUILD/freerouting/freerouting.jar
+fi
+for c in "$fr_jar" "${FREEROUTING_JAR:-}" ~/.local/share/kicad-ja-plus/freerouting.jar ~/.local/share/freerouting/freerouting.jar ~/cad-mcp-lab/tools/freerouting/freerouting-2.4.1.jar; do
   [ -n "$c" ] && [ -f "$c" ] && { fr_jar=$c; break; }
 done
+[ -n "$fr_jar" ] && [ "$fr_jar" != "$KICAD_LOCAL_BUILD/freerouting/freerouting.jar" ] && fr_opt="--jar $fr_jar"
 if [ -n "$fr_jar" ]; then
   kicad-python -c "import pcbnew,sys; b=pcbnew.LoadBoard('now/keepout.kicad_pcb'); [b.Remove(z) for z in list(b.Zones()) if z.GetIsRuleArea()]; b.Save('now/unrouted.kicad_pcb')" >/dev/null 2>&1
   cp in.kicad_pro now/unrouted.kicad_pro
-  chk "kicad-local autoroute(未配線 1 → 0、新しい違反なし)" "kicad-local autoroute now/unrouted.kicad_pcb now/autorouted.kicad_pcb --jar $fr_jar --passes 5 --timeout 300 --json > now/autoroute.json && python3 -c \"import json; d=json.load(open('now/autoroute.json')); assert d['unconnected_before']==1 and d['unconnected_after']==0 and not d['new_violations'], d\""
+  chk "kicad-local autoroute(未配線 1 → 0、新しい違反なし)" "kicad-local autoroute now/unrouted.kicad_pcb now/autorouted.kicad_pcb $fr_opt --passes 5 --timeout 300 --json > now/autoroute.json && python3 -c \"import json; d=json.load(open('now/autoroute.json')); assert d['unconnected_before']==1 and d['unconnected_after']==0 and not d['new_violations'], d\""
 else
   echo "  --  kicad-local autoroute: Freerouting が無いので飛ばした（FREEROUTING_JAR で指定できる）"
 fi

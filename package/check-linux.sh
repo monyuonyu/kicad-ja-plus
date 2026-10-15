@@ -30,12 +30,18 @@ if [ $has_ai = 1 ]; then
   chk "AI チャットの仲介役と AI 用の Python" "test -s '$b/scripting/kicad_ai/bridge.py' && test -x '$b/ai-runtime/bin/python3'"
 fi
 
+has_fr=0
+if [ -d "$b/freerouting" ]; then
+  has_fr=1
+  chk "Freerouting（jar・Java・使用許諾）" "test -s '$b/freerouting/freerouting.jar' && test -x '$b/freerouting/jre/bin/java' && test -s '$b/freerouting/LICENSE-freerouting.txt' && test -s '$b/freerouting/jre/legal/java.base/LICENSE'"
+fi
+
 echo "--- 共通のライブラリ（システムに無いものが無いこと）"
 : > "$t/missing"
 while read -r f; do
   [ "$(head -c4 "$f")" = $'\x7fELF' ] || continue
   env -u LD_LIBRARY_PATH ldd "$f" 2>/dev/null | grep "not found" | sed "s|^|${f#"$pkg"/}: |" >> "$t/missing"
-done < <(find "$b" -path "$b/ai-runtime" -prune -o -type f \( -perm -u+x -o -name '*.so*' -o -name '*.kiface' \) -print)
+done < <(find "$b" \( -path "$b/ai-runtime" -o -path "$b/freerouting" \) -prune -o -type f \( -perm -u+x -o -name '*.so*' -o -name '*.kiface' \) -print)
 if [ -s "$t/missing" ]; then
   ng "見つからないライブラリがある（DEPENDS-apt.txt のパッケージを apt で入れる）"
   sort -u "$t/missing" | head -20 | sed 's/^/        /'
@@ -56,6 +62,15 @@ if [ $has_ai = 1 ]; then
     "echo | env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN -u JA_CLAUDE_OAUTH_TOKEN PYTHON_KEYRING_BACKEND=keyring.backends.fail.Keyring \
        '$b/ai-runtime/bin/python3' '$b/scripting/kicad_ai/bridge.py' --datadir '$t/ai' | grep -q '\"need_key\"'"
   chk "SDK に同梱の claude" "'$b'/ai-runtime/lib/python3.*/site-packages/claude_agent_sdk/_bundled/claude --version"
+fi
+
+if [ $has_fr = 1 ]; then
+  # 同梱の jar と Java を自分で見つけて動くこと（システムの java や指定の環境変数は使わない）
+  mkdir -p "$t/ar" && cp "$pkg/test/in.kicad_pcb" "$pkg/test/in.kicad_pro" "$t/ar/"
+  (cd "$t/ar" && kicad-python -c "import pcbnew; b=pcbnew.LoadBoard('in.kicad_pcb'); t=[x for x in b.GetTracks() if not isinstance(x, pcbnew.PCB_VIA)]; b.Remove(t[len(t)//2]); b.Save('un.kicad_pcb')" && cp in.kicad_pro un.kicad_pro) > /dev/null 2>&1
+  chk "kicad-local autoroute（同梱の Freerouting と Java で、未配線 0）" \
+    "cd '$t/ar' && env -u FREEROUTING_JAR -u FREEROUTING_JAVA -u JAVA_HOME kicad-local autoroute un.kicad_pcb out.kicad_pcb --passes 5 --timeout 300 --json > ar.json; \
+     python3 -c \"import json,sys; d=json.load(open('ar.json')); print(d['java']); sys.exit(0 if d['ok'] and d['unconnected_after']==0 and d['java'].startswith('$b/freerouting/') and d['jar'].startswith('$b/freerouting/') else 1)\""
 fi
 
 if command -v xvfb-run > /dev/null; then

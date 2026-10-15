@@ -9,8 +9,10 @@
       ベタを塗り直す → 出力に保存（入力は変えない）→ 出力を DRC にかけ、未配線と新しく増えた違反を出す。
 
   --rip-up   既存の配線とビアを剥がしてから配線し直す（既定は、今ある配線を残して足りない所だけ）
-  --jar      Freerouting の jar（既定: 環境変数 FREEROUTING_JAR、~/.local/share/kicad-ja-plus/freerouting.jar ほか）
-             入手先: https://github.com/freerouting/freerouting/releases （Java 21 以降が要る）
+  --jar      Freerouting の jar（既定: 環境変数 FREEROUTING_JAR → 配布版に同梱の <build>/freerouting/freerouting.jar
+             → ~/.local/share/kicad-ja-plus/freerouting.jar ほか）
+             入手先: https://github.com/freerouting/freerouting/releases （Java 25 以降が要る）
+             java は 環境変数 FREEROUTING_JAVA → jar の隣の jre/ → 同梱の <build>/freerouting/jre → JAVA_HOME → PATH の順に探す
 
 終了コード: 0 = 未配線なし・新しい違反なし、1 = 残った、2 = 使い方の誤り・実行できない
 """
@@ -31,11 +33,33 @@ JARS = ["~/.local/share/kicad-ja-plus/freerouting.jar", "~/.local/share/freerout
 NOISE = ("lib_footprint_mismatch", "lib_footprint_issues", "silk_edge_clearance", "silk_overlap", "silk_over_copper")
 
 
+def bundled_dirs():
+    """配布版に同梱した Freerouting の置き場（<build>/freerouting。入口が KICAD_LOCAL_BUILD を設定する）"""
+    dirs = []
+    for env in ("KICAD_LOCAL_BUILD", "KICAD_LOCAL_HOME"):
+        if os.environ.get(env):
+            dirs.append(Path(os.environ[env]) / "freerouting")
+    dirs.append(Path(__file__).resolve().parent.parent / "build" / "freerouting")
+    return dirs
+
+
 def find_jar(arg):
-    for c in [arg, os.environ.get("FREEROUTING_JAR")] + JARS:
+    for c in [arg, os.environ.get("FREEROUTING_JAR")] + [str(d / "freerouting.jar") for d in bundled_dirs()] + JARS:
         if c and Path(c).expanduser().is_file():
             return Path(c).expanduser()
     return None
+
+
+def find_java(jar):
+    exe = "java.exe" if os.name == "nt" else "java"
+    cands = [os.environ.get("FREEROUTING_JAVA"), str(jar.parent / "jre" / "bin" / exe)]
+    cands += [str(d / "jre" / "bin" / exe) for d in bundled_dirs()]
+    if os.environ.get("JAVA_HOME"):
+        cands.append(str(Path(os.environ["JAVA_HOME"]) / "bin" / exe))
+    for c in cands:
+        if c and Path(c).is_file() and os.access(c, os.X_OK):
+            return c
+    return shutil.which("java")
 
 
 def drc(path):
@@ -70,8 +94,9 @@ def main():
         sys.stderr.write("Freerouting の jar が見つからない。--jar か FREEROUTING_JAR で指定する\n"
                          "入手先: https://github.com/freerouting/freerouting/releases\n")
         return 2
-    if not shutil.which("java"):
-        sys.stderr.write("java が無い（Freerouting には Java 21 以降が要る）\n")
+    java = find_java(jar)
+    if not java:
+        sys.stderr.write("java が無い（Freerouting 2.4.1 には Java 25 以降が要る。FREEROUTING_JAVA で指定できる）\n")
         return 2
 
     before = drc(src)
@@ -90,7 +115,7 @@ def main():
         sys.stderr.write("DSN に書き出せない\n")
         return 2
 
-    cmd = ["java", "-jar", str(jar), "-de", str(dsn), "-do", str(ses), "-mp", str(a.passes),
+    cmd = [java, "-Djava.awt.headless=true", "-jar", str(jar), "-de", str(dsn), "-do", str(ses), "-mp", str(a.passes),
            "--gui.enabled=false"]
     if a.threads:
         cmd += ["-mt", str(a.threads)]
@@ -122,7 +147,7 @@ def main():
     new_types = types(after) - types(before)
     tracks = sum(1 for t in board.GetTracks() if not isinstance(t, pcbnew.PCB_VIA))
     vias = sum(1 for t in board.GetTracks() if isinstance(t, pcbnew.PCB_VIA))
-    res = {"input": str(src), "output": str(dst), "unconnected_before": len(before.get("unconnected_items", [])),
+    res = {"input": str(src), "output": str(dst), "jar": str(jar), "java": java, "unconnected_before": len(before.get("unconnected_items", [])),
            "unconnected_after": len(after.get("unconnected_items", [])), "tracks": tracks, "vias": vias,
            "ripped": ripped, "new_violations": dict(new_types), "timed_out": timed_out, "log": str(log),
            "unconnected": [" ⇔ ".join(i.get("description", "") for i in v.get("items", [])[:2])
