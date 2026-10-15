@@ -42,9 +42,10 @@ get "$FR_LICENSE_URL" "$FR_LICENSE_SHA256" LICENSE-freerouting.txt
 # Freerouting が使うモジュールを jdeps で調べる（jar の中のライブラリが持つ module-info は外して、クラスとして調べる）
 t=$(mktemp -d)
 trap 'rm -rf "$t"' EXIT
-(cd "$t" && "$jdk/bin/jar$exe" xf "$dst/freerouting.jar")
+# クラスだけを取り出す（META-INF は外す。Windows では LICENSE と license のように大文字小文字だけ違う名前がぶつかる）
+command -v unzip >/dev/null || { echo "unzip が要る" >&2; exit 2; }
+unzip -q -o "$dst/freerouting.jar" '*.class' -x 'META-INF/*' -d "$t"
 find "$t" -name module-info.class -delete
-rm -rf "$t/META-INF/versions"
 w() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else echo "$1"; fi; }
 mods=$("$jdk/bin/jdeps$exe" --ignore-missing-deps --print-module-deps -q "$(w "$t")" | tr -d '\r' | tail -1)
 case "$mods" in java.base*) ;; *) echo "jdeps の結果がおかしい: $mods" >&2; exit 1 ;; esac
