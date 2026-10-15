@@ -1,0 +1,23 @@
+#!/bin/bash
+# 改良した KiCad の画面（GUI）を、ビルドした場所（配布版は同梱の build/）から起動する。
+# 名前で起動するものが変わる: kicad-ja（プロジェクトマネージャー）、pcbnew-ja（基板エディタ）、eeschema-ja（回路図エディタ）
+# 部品ライブラリ・3D モデル・テンプレートは、システムに入れた本家の KiCad（/usr/share/kicad）のものを使う。
+KICAD_LOCAL_HOME=${KICAD_LOCAL_HOME:-$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)}
+# 配布版は同梱の build/、ソースから作ったときは ~/src/build-10.0.6
+[ -z "$KICAD_LOCAL_BUILD" ] && [ -d "$KICAD_LOCAL_HOME/build" ] && KICAD_LOCAL_BUILD=$KICAD_LOCAL_HOME/build
+KICAD_LOCAL_BUILD=${KICAD_LOCAL_BUILD:-$HOME/src/build-10.0.6}
+export KICAD_LOCAL_HOME KICAD_LOCAL_BUILD
+export KICAD_RUN_FROM_BUILD_DIR=1
+for v in 8 9 10; do
+  export KICAD${v}_FOOTPRINT_DIR=${KICAD_LIB_DIR:-/usr/share/kicad}/footprints
+  export KICAD${v}_SYMBOL_DIR=${KICAD_LIB_DIR:-/usr/share/kicad}/symbols
+  export KICAD${v}_3DMODEL_DIR=${KICAD_LIB_DIR:-/usr/share/kicad}/3dmodels
+  export KICAD${v}_TEMPLATE_DIR=${KICAD_LIB_DIR:-/usr/share/kicad}/template
+done
+case "$(basename "$0")" in
+  pcbnew-ja) exe=pcbnew/pcbnew ;;
+  eeschema-ja) exe=eeschema/eeschema ;;
+  *) exe=kicad/kicad ;;
+esac
+[ -x "$KICAD_LOCAL_BUILD/$exe" ] || { echo "見つからない: $KICAD_LOCAL_BUILD/$exe（KICAD_LOCAL_BUILD を確かめる）" >&2; exit 2; }
+exec "$KICAD_LOCAL_BUILD/$exe" "$@"
