@@ -1,0 +1,204 @@
+# 大まかなバグ探し: 改良した KiCad 10.0.6 を ASan/UBSan つきで作り、公開の設計ファイルを kicad-cli に通す
+# 落ちた・止まった・サニタイザが何か言った物だけを残し、同じ物を 1 件に寄せた表（report.md）を作る
+#   gh workflow run bughunt.yml                          # ビルドから
+#   gh workflow run bughunt.yml -f build_run_id=<前の回>  # その回のビルドを使い回す（7 日間）
+# 道具は tools/bughunt/（材料のリスト corpus.txt、run.py、run_qa.py、triage.py）
+name: Bug hunt (ASan/UBSan)
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: "ビルドを使い回す回の番号（空ならビルドする）"
+        default: ""
+      timeout:
+        description: "コマンド 1 回の時間の上限（秒）"
+        default: "180"
+      budget_min:
+        description: "シャード 1 つが新しい材料に手を付ける時間の上限（分）"
+        default: "270"
+      limit:
+        description: "シャードごとに先頭 N 件だけ（0 = 全部。試しに回すとき）"
+        default: "0"
+
+permissions:
+  contents: read
+  actions: write   # 古い ccache を消す・別の回の成果物を取る
+
+env:
+  VER: "10.0.6"
+  SRC: /home/runner/src/kicad-10.0.6
+  BUILD: /home/runner/src/build-asan
+  SHARDS: "8"
+  ASAN_OPTIONS: detect_leaks=0:detect_odr_violation=0:halt_on_error=1:handle_abort=1:handle_segv=1:allocator_may_return_null=1:symbolize=1:detect_stack_use_after_return=0:malloc_context_size=10
+  UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=0:report_error_type=1
+  KICAD_RUN_FROM_BUILD_DIR: "1"
+
+jobs:
+  build:
+    if: inputs.build_run_id == ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make room
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h / /mnt
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $(cat patches/$VER/builddeps.txt) ccache zstd
+
+      - name: Get KiCad and apply the patches
+        run: ./apply.sh $VER "$SRC"
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ccache
+          key: bughunt-ccache-${{ github.run_id }}
+          restore-keys: bughunt-ccache-
+
+      - name: Configure (ASan + UBSan + libstdc++ assertions, -O1 -g1)
+        run: |
+          san="-fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer"
+          cmake -S "$SRC" -B "$BUILD" -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O1 -g1 -DNDEBUG" -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O1 -g1 -DNDEBUG" \
+            -DCMAKE_C_FLAGS="$san" -DCMAKE_CXX_FLAGS="$san" \
+            -DCMAKE_EXE_LINKER_FLAGS="$san" -DCMAKE_SHARED_LINKER_FLAGS="$san" -DCMAKE_MODULE_LINKER_FLAGS="$san" \
+            -DKICAD_SANITIZE_ADDRESS=ON -DKICAD_STDLIB_LIGHT_DEBUG=ON -DKICAD_BUILD_QA_TESTS=ON \
+            -DKICAD_SCRIPTING_WXPYTHON=OFF -DKICAD_BUILD_I18N=OFF -DCMAKE_INSTALL_PREFIX=/usr \
+            -DCMAKE_JOB_POOLS="link=2" -DCMAKE_JOB_POOL_LINK=link \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        id: build
+        timeout-minutes: 300
+        env:
+          CCACHE_MAXSIZE: 5G
+        run: |
+          ccache -z
+          ninja -C "$BUILD" -j4 kicad-cli pcbnew_kiface eeschema_kiface kicad_gerber \
+            qa_common qa_kimath qa_sexpr qa_pcbnew qa_eeschema qa_gerbview
+          ccache -s | head -20
+
+      # 時間切れでも、それまでの分を次の回に持ち越す
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ccache
+          key: bughunt-ccache-${{ github.run_id }}
+
+      - name: Drop older ccache entries
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh cache list -R "$GITHUB_REPOSITORY" --key bughunt-ccache- --json key -q '.[].key' |
+            grep -v "^bughunt-ccache-${{ github.run_id }}$" | while read -r k; do gh cache delete -R "$GITHUB_REPOSITORY" "$k" || true; done
+
+      - name: Pack the build (no objects)
+        run: |
+          cd "$(dirname "$BUILD")"
+          tar --exclude='*.o' --exclude='*.a' --exclude='.ninja_*' --exclude='CMakeFiles' \
+            -cf - "$(basename "$BUILD")" | zstd -T0 -6 -o /tmp/build-asan.tar.zst
+          ls -la /tmp/build-asan.tar.zst
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bughunt-build
+          path: /tmp/build-asan.tar.zst
+          retention-days: 7
+          compression-level: 0
+
+  run:
+    needs: build
+    if: ${{ !cancelled() && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 345
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, qa]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $(cat patches/$VER/builddeps.txt) zstd xvfb
+
+      # ソースは単体試験の材料（qa/data）と、ビルドの場所から動かすときの資源のため（同じ場所に）
+      - name: Get KiCad and apply the patches
+        run: ./apply.sh $VER "$SRC"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bughunt-build
+          path: /tmp/dl
+          run-id: ${{ inputs.build_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Unpack the build
+        run: |
+          mkdir -p "$(dirname "$BUILD")"
+          zstd -dc /tmp/dl/build-asan.tar.zst | tar -C "$(dirname "$BUILD")" -xf -
+          # 初めての起動で設定を作る（並列で同時に作らせない）。ライブラリの表は空で
+          mkdir -p ~/.config/kicad/10.0
+          echo '(fp_lib_table (version 7))' > ~/.config/kicad/10.0/fp-lib-table
+          echo '(sym_lib_table (version 7))' > ~/.config/kicad/10.0/sym-lib-table
+          "$BUILD/kicad/kicad-cli" version 2>&1 | tail -3
+
+      - name: Get the corpus
+        if: matrix.shard != 'qa'
+        run: tools/bughunt/fetch_corpus.sh tools/bughunt/corpus.txt /home/runner/corpus 16 | tail -5
+
+      - name: Run kicad-cli over the corpus
+        if: matrix.shard != 'qa'
+        run: |
+          python3 -I tools/bughunt/run.py --cli "$BUILD/kicad/kicad-cli" --gerber "$BUILD/gerbview/kicad_gerber" \
+            --out out --shard ${{ matrix.shard }}/$SHARDS --jobs 4 --timeout ${{ inputs.timeout }} \
+            --budget-min ${{ inputs.budget_min }} --limit ${{ inputs.limit }} \
+            /home/runner/corpus "$SRC/qa/data" "$SRC/demos" | tail -40
+
+      - name: Run the unit tests
+        if: matrix.shard == 'qa'
+        run: |
+          xvfb-run -a python3 tools/bughunt/run_qa.py --out out --jobs 4 --timeout 2400 \
+            $(find "$BUILD/qa/tests" -maxdepth 2 -type f -executable -name 'qa_*' | sort)
+
+      - name: Short report of this shard
+        if: always()
+        run: python3 -I tools/bughunt/triage.py --corpus-list tools/bughunt/corpus.txt -o out/report.md out | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bughunt-out-${{ matrix.shard }}
+          path: out/
+          retention-days: 30
+
+  triage:
+    needs: run
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bughunt-out-*
+          path: all
+      - name: Merge and dedupe
+        run: |
+          python3 -I tools/bughunt/triage.py --corpus-list tools/bughunt/corpus.txt -o report.md --json issues.json all
+          head -c 60000 report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bughunt-report
+          path: |
+            report.md
+            issues.json
+          retention-days: 90
