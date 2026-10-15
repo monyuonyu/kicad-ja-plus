@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Claude Opus 5.5 <noreply@anthropic.com>
+Date: Thu, 15 Oct 2026 22:30:00 +0900
+Subject: [PATCH] kicad-cli pcb upgrade: do not crash when the board fails to
+ load (backport of the master fix)
+
+getBoard() returns nullptr when loading fails (e.g. a board written by the
+Eagle importer with items on an UNDEFINED layer); JobUpgrade dereferenced it.
+master already has the same check.
+
+Found by tools/bughunt (pcb import of an Eagle board, then pcb upgrade).
+---
+--- a/pcbnew/pcbnew_jobs_handler.cpp
++++ b/pcbnew/pcbnew_jobs_handler.cpp
+@@ -2691,6 +2691,10 @@
+     {
+         IO_RELEASER<PCB_IO> pi( PCB_IO_MGR::FindPlugin( PCB_IO_MGR::KICAD_SEXP ) );
+         BOARD*              brd = getBoard( job->m_filename );
++
++        if( !brd )
++            return CLI::EXIT_CODES::ERR_INVALID_INPUT_FILE;
++
+         if( brd->GetFileFormatVersionAtLoad() < SEXPR_BOARD_FILE_VERSION )
+             shouldSave = true;
+ 
