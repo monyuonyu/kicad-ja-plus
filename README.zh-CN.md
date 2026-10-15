@@ -110,6 +110,7 @@ wxWidgets、OpenCASCADE、ngspice 等公共组件以及元件库、3D 模型，�
 3. 图形界面用 `pcbnew-ja`（PCB 编辑器）、`eeschema-ja`（原理图编辑器）、`kicad-ja`（项目管理器）启动
    （WSL2 中通过 WSLg 显示）。在 Python 中：`kicad-python -c "import pcbnew; print(pcbnew.Version())"`。
 
+- 如果系统中从未启动过 KiCad，请先启动一次 `kicad-ja` 或上游的 `kicad`，完成初始设置（库表）。
 - `bin/` 中的入口会自动使用解压目录中的 `build/`。若从其他位置的 `bin/`（例如 git 克隆的本仓库）使用，
   请设置 `export KICAD_LOCAL_BUILD=<解压目录>/build`。
 - 如果上游 KiCad 是其他系列（例如 10.0.6 版配 KiCad 8 的 PPA），请用 `sudo apt install $(cat DEPENDS-apt.txt)` 安装缺少的公共组件。

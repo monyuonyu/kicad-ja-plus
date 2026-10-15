@@ -110,6 +110,7 @@ Shared components such as wxWidgets, OpenCASCADE and ngspice, and the part libra
 3. Start the GUI with `pcbnew-ja` (PCB editor), `eeschema-ja` (schematic editor) or `kicad-ja` (project manager)
    (on WSL2 it appears through WSLg). From Python: `kicad-python -c "import pcbnew; print(pcbnew.Version())"`.
 
+- If KiCad has never been started on the system, start `kicad-ja` or upstream `kicad` once to finish the first-run setup (library tables).
 - The launchers in `bin/` use the `build/` inside the extracted folder automatically. To use them from another `bin/` (e.g. a git clone of this repository),
   set `export KICAD_LOCAL_BUILD=<extracted folder>/build`.
 - If the upstream KiCad is from another series (e.g. the KiCad 8 PPA with the 10.0.6 package), install the missing shared components with

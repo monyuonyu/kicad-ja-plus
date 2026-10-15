@@ -108,6 +108,7 @@ wxWidgets・OpenCASCADE・ngspice などの共通の部品と、部品ライブ�
 3. 画面は `pcbnew-ja`（基板エディタ）・`eeschema-ja`（回路図エディタ）・`kicad-ja`（プロジェクトマネージャー）で起動します
    （WSL2 は WSLg の画面に出ます）。Python からは `kicad-python -c "import pcbnew; print(pcbnew.Version())"`。
 
+- KiCad を一度も起動していない環境では、先に `kicad-ja` か本家の `kicad` を一度起動して初めの設定（ライブラリの表）を済ませます。
 - 入口（`bin/`）は、展開した中の `build/` を自動で使います。ほかの場所の `bin/`（git で取ったこのリポジトリなど）から使うときは
   `export KICAD_LOCAL_BUILD=<展開した場所>/build` を設定します。
 - 本家の KiCad を別の系列（例: 10.0.6 版に KiCad 8 の PPA）にしたときは、足りない共通の部品を `sudo apt install $(cat DEPENDS-apt.txt)` で入れます。
