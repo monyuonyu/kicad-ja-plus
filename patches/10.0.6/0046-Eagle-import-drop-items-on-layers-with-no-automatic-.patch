@@ -1,0 +1,44 @@
+From 520cfefc2bc3db1103b7c95ccdb81e5c4a38e2ca Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Sat, 17 Oct 2026 06:09:45 +0900
+Subject: [PATCH 46/47] Eagle import: drop items on layers with no automatic
+ mapping (backport of master ec6d46d3)
+
+Without a layer mapping dialog (kicad-cli pcb import), Eagle layers such as
+tRestrict, Measures or tTest map to UNSELECTED_LAYER, and the loaders, which
+only skip UNDEFINED_LAYER, created items on it. The board was saved with
+(layer "UNDEFINED") and could not be opened again. master fixed this in
+ec6d46d3; the 10.0 branch has not.
+
+Found by tools/bughunt (141 of 330 Eagle boards could not be reloaded after
+pcb import).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ pcbnew/pcb_io/eagle/pcb_io_eagle.cpp | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/pcbnew/pcb_io/eagle/pcb_io_eagle.cpp b/pcbnew/pcb_io/eagle/pcb_io_eagle.cpp
+index 35c82ad7..63da04a5 100644
+--- a/pcbnew/pcb_io/eagle/pcb_io_eagle.cpp
++++ b/pcbnew/pcb_io/eagle/pcb_io_eagle.cpp
+@@ -2935,6 +2935,16 @@ void PCB_IO_EAGLE::mapEagleLayersToKicad( bool aIsLibraryCache )
+ 
+     m_layer_map = m_layer_mapping_handler( inputDescs );
+ 
++    // A layer the handler leaves at UNSELECTED_LAYER has no placement target: the
++    // headless default callback has no user to consult, and the item loaders only
++    // skip UNDEFINED_LAYER. Normalize it so those items are dropped rather than
++    // stranded on an out-of-range layer.
++    for( auto& [name, layer] : m_layer_map )
++    {
++        if( layer == UNSELECTED_LAYER )
++            layer = UNDEFINED_LAYER;
++    }
++
+     if( m_progressReporter && dynamic_cast<wxWindow*>( m_progressReporter ))
+         dynamic_cast<wxWindow*>( m_progressReporter )->Show();
+ }
+-- 
+2.43.0
+

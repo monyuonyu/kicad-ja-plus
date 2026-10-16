@@ -33,6 +33,7 @@
 | 0043 | 基板に載っていない物の裏返しで落ちる（旧形式の .mod の裏面のフットプリントを `fp upgrade`）。本家 master [6a26ce9d](https://gitlab.com/kicad/code/kicad/-/commit/6a26ce9d) の一部を持ってきた | KiCad 全体のバグ探しで見つけた（ASan: SEGV） |
 | 0044 | `pcb export stats` の線どうしの最小の間隔を調べるところで整数があふれ、間隔が正しく出ないことがある。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、1000 基板以上） |
 | 0045 | Altium のバイナリの読み込み: 詰めて並んだ値を、境界の合わない場所から直接読む（memcpy に）。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、約 350 件） |
+| 0046 | Eagle の取り込み（画面なし）: 対応する層の無い物を「UNDEFINED」層に置き、取り込んだ基板が開けない。本家 master [ec6d46d3](https://gitlab.com/kicad/code/kicad/-/commit/ec6d46d38db72d02798524f1c630a9c1d17d91b3) を持ってきた | KiCad 全体のバグ探しで見つけた（Eagle の基板 141 件が読み直せなかった） |
 
 8.0.9 で取り込んだ残りのもの（ルーターの修正 18 件、`drc --refill-zones`、`pcb export stats`、`pcb render`）は 10.0.6 に元から入っている。
 
