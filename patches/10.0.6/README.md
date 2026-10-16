@@ -34,6 +34,7 @@
 | 0044 | `pcb export stats` の線どうしの最小の間隔を調べるところで整数があふれ、間隔が正しく出ないことがある。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、1000 基板以上） |
 | 0045 | Altium のバイナリの読み込み: 詰めて並んだ値を、境界の合わない場所から直接読む（memcpy に）。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、約 350 件） |
 | 0046 | Eagle の取り込み（画面なし）: 対応する層の無い物を「UNDEFINED」層に置き、取り込んだ基板が開けない。本家 master [ec6d46d3](https://gitlab.com/kicad/code/kicad/-/commit/ec6d46d38db72d02798524f1c630a9c1d17d91b3) を持ってきた | KiCad 全体のバグ探しで見つけた（Eagle の基板 141 件が読み直せなかった） |
+| 0047 | ガーバーを図形にするとき、消す側（%LPC%）の図形が続くと 1 個ごとに引き算して、大きなシルクで 5 分以上かかる（まとめて 1 回に。1 秒未満）。本家 master（kicad-cli gerber）も同じ | KiCad 全体のバグ探しで見つけた（kicad_gerber info の時間切れ） |
 
 8.0.9 で取り込んだ残りのもの（ルーターの修正 18 件、`drc --refill-zones`、`pcb export stats`、`pcb render`）は 10.0.6 に元から入っている。
 

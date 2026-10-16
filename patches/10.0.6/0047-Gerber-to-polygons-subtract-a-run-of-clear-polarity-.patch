@@ -1,0 +1,63 @@
+From 6946be605e5e67caae6febd858abd28f1738b5e0 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Sat, 17 Oct 2026 06:11:47 +0900
+Subject: [PATCH 47/47] Gerber to polygons: subtract a run of clear-polarity
+ items once
+
+ConvertGerberToPolySet() subtracted the negative polygons from everything drawn
+so far after every single clear-polarity item, so a file that stays in %LPC%
+for thousands of items needed thousands of boolean operations (a 2.4 MB
+silkscreen took more than 5 minutes in kicad_gerber info; now under a second).
+Collect consecutive negative items and subtract them when the next positive
+item arrives or at the end, which gives the same result. The same code is on
+master (kicad-cli gerber).
+
+Found by tools/bughunt (gerber-info timeouts).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ gerbview/gerber_to_polyset.cpp | 19 ++++++++++++-------
+ 1 file changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/gerbview/gerber_to_polyset.cpp b/gerbview/gerber_to_polyset.cpp
+index 6df050c1..7b03eee4 100644
+--- a/gerbview/gerber_to_polyset.cpp
++++ b/gerbview/gerber_to_polyset.cpp
+@@ -84,6 +84,15 @@ SHAPE_POLY_SET ConvertGerberToPolySet( GERBER_FILE_IMAGE* aImage, int aTolerance
+         // Offset by the item's position before applying the AB transform.
+         VECTOR2I offset = needsFlashOffset ? VECTOR2I( item->m_Start ) : VECTOR2I( 0, 0 );
+ 
++        // Negative items erase what was drawn before them. Collect a run of them and subtract
++        // it once, when the next positive item comes (or at the end): subtracting after every
++        // negative item made files with many clear-polarity items take minutes
++        if( !item->GetLayerPolarity() && negativePolygons.OutlineCount() > 0 )
++        {
++            positivePolygons.BooleanSubtract( negativePolygons );
++            negativePolygons.RemoveAllContours();
++        }
++
+         SHAPE_POLY_SET& dest = item->GetLayerPolarity() ? negativePolygons : positivePolygons;
+ 
+         for( int i = 0; i < itemPoly.OutlineCount(); i++ )
+@@ -103,15 +112,11 @@ SHAPE_POLY_SET ConvertGerberToPolySet( GERBER_FILE_IMAGE* aImage, int aTolerance
+                     dest.Append( item->GetABPosition( hole.CPoint( j ) + offset ) );
+             }
+         }
+-
+-        // Handle negative polygons: they are subtracted to previous polygons
+-        if( negativePolygons.OutlineCount() > 0 )
+-        {
+-            positivePolygons.BooleanSubtract( negativePolygons );
+-            negativePolygons.RemoveAllContours();
+-        }
+     }
+ 
++    if( negativePolygons.OutlineCount() > 0 )
++        positivePolygons.BooleanSubtract( negativePolygons );
++
+     // Single-pass union of all positive items
+     positivePolygons.Simplify();
+ 
+-- 
+2.43.0
+
