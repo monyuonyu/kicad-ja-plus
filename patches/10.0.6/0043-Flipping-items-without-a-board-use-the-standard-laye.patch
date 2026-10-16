@@ -1,0 +1,286 @@
+From 5f54cc88edab2e90ebe983c41f9d140110c630eb Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Sat, 17 Oct 2026 06:09:20 +0900
+Subject: [PATCH 43/47] Flipping items without a board: use the standard layer
+ pairs (backport of master 6a26ce9d)
+
+Saving a back-side footprint to a library (fp upgrade of a legacy .mod, for
+example) flips it to the front while it has no parent board, and
+PCB_TEXT::Flip() and friends called GetBoard()->FlipLayer() on nullptr
+(ASan: SEGV in BOARD::FlipLayer). Add BOARD_ITEM::GetFlippedLayer(), which
+falls back to ::FlipLayer() like FOOTPRINT::Flip() already did, and use it
+for the items a footprint can hold. master fixed this in 6a26ce9d
+("pcbnew: BOARD-is-null cleanup"); the 10.0 branch has not.
+
+Found by tools/bughunt (fp upgrade of legacy .mod libraries).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/board_item.h           |  7 +++++++
+ pcbnew/board_item.cpp          |  9 +++++++++
+ pcbnew/pad.cpp                 |  2 +-
+ pcbnew/padstack.cpp            | 24 +++++++++++++++---------
+ pcbnew/pcb_barcode.cpp         |  2 +-
+ pcbnew/pcb_dimension.cpp       |  2 +-
+ pcbnew/pcb_generator.cpp       |  2 +-
+ pcbnew/pcb_point.cpp           |  2 +-
+ pcbnew/pcb_reference_image.cpp |  2 +-
+ pcbnew/pcb_shape.cpp           |  2 +-
+ pcbnew/pcb_table.cpp           |  2 +-
+ pcbnew/pcb_target.cpp          |  2 +-
+ pcbnew/pcb_text.cpp            |  2 +-
+ pcbnew/zone.cpp                |  6 +++---
+ 14 files changed, 44 insertions(+), 22 deletions(-)
+
+diff --git a/include/board_item.h b/include/board_item.h
+index dfce4e63..a175efce 100644
+--- a/include/board_item.h
++++ b/include/board_item.h
+@@ -407,6 +407,13 @@ public:
+      */
+     virtual void Flip( const VECTOR2I& aCentre, FLIP_DIRECTION aFlipDirection );
+ 
++    /**
++     * The layer on the other side of the board.  Uses the parent board's layer pairs when there
++     * is one; library items (no board, e.g. while saving a footprint library) use the standard
++     * front/back pairs.
++     */
++    PCB_LAYER_ID GetFlippedLayer( PCB_LAYER_ID aLayer ) const;
++
+     /**
+      * Mirror this object relative to a given horizontal axis the layer is not changed.
+      *
+diff --git a/pcbnew/board_item.cpp b/pcbnew/board_item.cpp
+index 76830a09..b5ea138f 100644
+--- a/pcbnew/board_item.cpp
++++ b/pcbnew/board_item.cpp
+@@ -89,6 +89,15 @@ const BOARD* BOARD_ITEM::GetBoard() const
+ }
+ 
+ 
++PCB_LAYER_ID BOARD_ITEM::GetFlippedLayer( PCB_LAYER_ID aLayer ) const
++{
++    if( const BOARD* board = GetBoard() )
++        return board->FlipLayer( aLayer );
++
++    return ::FlipLayer( aLayer );
++}
++
++
+ BOARD* BOARD_ITEM::GetBoard()
+ {
+     if( Type() == PCB_T )
+diff --git a/pcbnew/pad.cpp b/pcbnew/pad.cpp
+index 5b71896d..23cd81d4 100644
+--- a/pcbnew/pad.cpp
++++ b/pcbnew/pad.cpp
+@@ -1530,7 +1530,7 @@ void PAD::Flip( const VECTOR2I& aCentre, FLIP_DIRECTION aFlipDirection )
+     LSET flipped;
+ 
+     for( PCB_LAYER_ID layer : m_padStack.LayerSet() )
+-        flipped.set( GetBoard()->FlipLayer( layer ) );
++        flipped.set( GetFlippedLayer( layer ) );
+ 
+     SetLayerSet( flipped );
+ 
+diff --git a/pcbnew/padstack.cpp b/pcbnew/padstack.cpp
+index d55ac6dc..94d6292a 100644
+--- a/pcbnew/padstack.cpp
++++ b/pcbnew/padstack.cpp
+@@ -1475,14 +1475,20 @@ double PADSTACK::Similarity( const PADSTACK& aOther ) const
+ 
+ void PADSTACK::FlipLayers( BOARD* aBoard )
+ {
++    // A footprint being saved to a library has no board: use the standard front/back pairs
++    auto flip = [aBoard]( PCB_LAYER_ID aLayer )
++                {
++                    return aBoard ? aBoard->FlipLayer( aLayer ) : ::FlipLayer( aLayer );
++                };
++
+     if( m_mode == MODE::FRONT_INNER_BACK )
+     {
+         std::unordered_map<PCB_LAYER_ID, COPPER_LAYER_PROPS> oldCopperProps = m_copperProps;
+         m_copperProps.clear();
+ 
+-        m_copperProps[aBoard->FlipLayer( F_Cu )] = oldCopperProps[F_Cu];
++        m_copperProps[flip( F_Cu )] = oldCopperProps[F_Cu];
+         m_copperProps[INNER_LAYERS] = oldCopperProps[INNER_LAYERS];
+-        m_copperProps[aBoard->FlipLayer( B_Cu )] = oldCopperProps[B_Cu];
++        m_copperProps[flip( B_Cu )] = oldCopperProps[B_Cu];
+     }
+     else if( m_mode == MODE::CUSTOM )
+     {
+@@ -1490,19 +1496,19 @@ void PADSTACK::FlipLayers( BOARD* aBoard )
+         m_copperProps.clear();
+ 
+         for( const auto& [layer, props] : oldCopperProps )
+-            m_copperProps[aBoard->FlipLayer( layer )] = props;
++            m_copperProps[flip( layer )] = props;
+     }
+ 
+     std::swap( m_frontMaskProps, m_backMaskProps );
+ 
+-    m_drill.start = aBoard->FlipLayer( m_drill.start );
+-    m_drill.end = aBoard->FlipLayer( m_drill.end );
++    m_drill.start = flip( m_drill.start );
++    m_drill.end = flip( m_drill.end );
+ 
+-    m_secondaryDrill.start = aBoard->FlipLayer( m_secondaryDrill.start );
+-    m_secondaryDrill.end = aBoard->FlipLayer( m_secondaryDrill.end );
++    m_secondaryDrill.start = flip( m_secondaryDrill.start );
++    m_secondaryDrill.end = flip( m_secondaryDrill.end );
+ 
+-    m_tertiaryDrill.start = aBoard->FlipLayer( m_tertiaryDrill.start );
+-    m_tertiaryDrill.end = aBoard->FlipLayer( m_tertiaryDrill.end );
++    m_tertiaryDrill.start = flip( m_tertiaryDrill.start );
++    m_tertiaryDrill.end = flip( m_tertiaryDrill.end );
+ 
+     std::swap( m_frontPostMachining, m_backPostMachining );
+ }
+diff --git a/pcbnew/pcb_barcode.cpp b/pcbnew/pcb_barcode.cpp
+index 7a23aeb8..5fe61658 100644
+--- a/pcbnew/pcb_barcode.cpp
++++ b/pcbnew/pcb_barcode.cpp
+@@ -315,7 +315,7 @@ void PCB_BARCODE::Flip( const VECTOR2I& aCentre, FLIP_DIRECTION aFlipDirection )
+     if( aFlipDirection == FLIP_DIRECTION::TOP_BOTTOM )
+         m_angle += ANGLE_180;
+ 
+-    SetLayer( GetBoard()->FlipLayer( GetLayer() ) );
++    SetLayer( GetFlippedLayer( GetLayer() ) );
+ 
+     AssembleBarcode();
+ }
+diff --git a/pcbnew/pcb_dimension.cpp b/pcbnew/pcb_dimension.cpp
+index 7fe77f97..a4d8173e 100644
+--- a/pcbnew/pcb_dimension.cpp
++++ b/pcbnew/pcb_dimension.cpp
+@@ -583,7 +583,7 @@ void PCB_DIMENSION_BASE::Flip( const VECTOR2I& aCentre, FLIP_DIRECTION aFlipDire
+ {
+     Mirror( aCentre, aFlipDirection );
+ 
+-    SetLayer( GetBoard()->FlipLayer( GetLayer() ) );
++    SetLayer( GetFlippedLayer( GetLayer() ) );
+ }
+ 
+ 
+diff --git a/pcbnew/pcb_generator.cpp b/pcbnew/pcb_generator.cpp
+index 7a05491e..539e3742 100644
+--- a/pcbnew/pcb_generator.cpp
++++ b/pcbnew/pcb_generator.cpp
+@@ -111,7 +111,7 @@ void PCB_GENERATOR::Flip( const VECTOR2I& aCentre, FLIP_DIRECTION aFlipDirection
+ {
+     baseMirror( aCentre, aFlipDirection );
+ 
+-    SetLayer( GetBoard()->FlipLayer( GetLayer() ) );
++    SetLayer( GetFlippedLayer( GetLayer() ) );
+ 
+     PCB_GROUP::Flip( aCentre, aFlipDirection );
+ }
+diff --git a/pcbnew/pcb_point.cpp b/pcbnew/pcb_point.cpp
+index 8723ea00..d56f2bda 100644
+--- a/pcbnew/pcb_point.cpp
++++ b/pcbnew/pcb_point.cpp
+@@ -141,7 +141,7 @@ void PCB_POINT::Flip( const VECTOR2I& aCentre, FLIP_DIRECTION aFlipDirection )
+ {
+     MIRROR(m_pos, aCentre, aFlipDirection);
+ 
+-    SetLayer( GetBoard()->FlipLayer( GetLayer() ) );
++    SetLayer( GetFlippedLayer( GetLayer() ) );
+ }
+ 
+ 
+diff --git a/pcbnew/pcb_reference_image.cpp b/pcbnew/pcb_reference_image.cpp
+index 6018c2ac..788e8be1 100644
+--- a/pcbnew/pcb_reference_image.cpp
++++ b/pcbnew/pcb_reference_image.cpp
+@@ -253,7 +253,7 @@ void PCB_REFERENCE_IMAGE::Flip( const VECTOR2I& aCentre, FLIP_DIRECTION aFlipDir
+     m_referenceImage.Flip( aCentre, aFlipDirection );
+ 
+     if( GetBoard() )
+-        SetLayer( GetBoard()->FlipLayer( GetLayer() ) );
++        SetLayer( GetFlippedLayer( GetLayer() ) );
+     else
+         SetLayer( FlipLayer( GetLayer() ) );
+ }
+diff --git a/pcbnew/pcb_shape.cpp b/pcbnew/pcb_shape.cpp
+index c1b2375a..2af56853 100644
+--- a/pcbnew/pcb_shape.cpp
++++ b/pcbnew/pcb_shape.cpp
+@@ -585,7 +585,7 @@ void PCB_SHAPE::Flip( const VECTOR2I& aCentre, FLIP_DIRECTION aFlipDirection )
+ {
+     flip( aCentre, aFlipDirection );
+ 
+-    SetLayer( GetBoard()->FlipLayer( GetLayer() ) );
++    SetLayer( GetFlippedLayer( GetLayer() ) );
+ }
+ 
+ 
+diff --git a/pcbnew/pcb_table.cpp b/pcbnew/pcb_table.cpp
+index 4bf855f8..7ddca21c 100644
+--- a/pcbnew/pcb_table.cpp
++++ b/pcbnew/pcb_table.cpp
+@@ -362,7 +362,7 @@ void PCB_TABLE::Flip( const VECTOR2I& aCentre, FLIP_DIRECTION aFlipDirection )
+ 
+     m_colWidths = std::move( newColWidths );
+ 
+-    SetLayer( GetBoard()->FlipLayer( GetLayer() ) );
++    SetLayer( GetFlippedLayer( GetLayer() ) );
+     Normalize();
+ 
+     if( originalAngle != ANGLE_0 )
+diff --git a/pcbnew/pcb_target.cpp b/pcbnew/pcb_target.cpp
+index 3f6a85fa..26841bbf 100644
+--- a/pcbnew/pcb_target.cpp
++++ b/pcbnew/pcb_target.cpp
+@@ -100,7 +100,7 @@ void PCB_TARGET::Flip( const VECTOR2I& aCentre, FLIP_DIRECTION aFlipDirection )
+     else
+         m_pos.y = aCentre.y - ( m_pos.y - aCentre.y );
+ 
+-    SetLayer( GetBoard()->FlipLayer( GetLayer() ) );
++    SetLayer( GetFlippedLayer( GetLayer() ) );
+ }
+ 
+ 
+diff --git a/pcbnew/pcb_text.cpp b/pcbnew/pcb_text.cpp
+index 3cacef46..0b61a825 100644
+--- a/pcbnew/pcb_text.cpp
++++ b/pcbnew/pcb_text.cpp
+@@ -493,7 +493,7 @@ void PCB_TEXT::Flip( const VECTOR2I& aCentre, FLIP_DIRECTION aFlipDirection )
+         SetTextAngle( ANGLE_180 - GetTextAngle() );
+     }
+ 
+-    SetLayer( GetBoard()->FlipLayer( GetLayer() ) );
++    SetLayer( GetFlippedLayer( GetLayer() ) );
+ 
+     if( IsSideSpecific() )
+         SetMirrored( !IsMirrored() );
+diff --git a/pcbnew/zone.cpp b/pcbnew/zone.cpp
+index 1d343b6a..b3132b92 100644
+--- a/pcbnew/zone.cpp
++++ b/pcbnew/zone.cpp
+@@ -1169,19 +1169,19 @@ void ZONE::Flip( const VECTOR2I& aCentre, FLIP_DIRECTION aFlipDirection )
+     LSET flipped;
+ 
+     for( PCB_LAYER_ID layer : GetLayerSet() )
+-        flipped.set( GetBoard()->FlipLayer( layer ) );
++        flipped.set( GetFlippedLayer( layer ) );
+ 
+     SetLayerSet( flipped );
+ 
+     for( auto& [oldLayer, properties] : layerPropertiesCopy )
+     {
+-        PCB_LAYER_ID newLayer = GetBoard()->FlipLayer( oldLayer );
++        PCB_LAYER_ID newLayer = GetFlippedLayer( oldLayer );
+         m_layerProperties[newLayer] = properties;
+     }
+ 
+     for( auto& [oldLayer, shape] : fillsCopy )
+     {
+-        PCB_LAYER_ID newLayer = GetBoard()->FlipLayer( oldLayer );
++        PCB_LAYER_ID newLayer = GetFlippedLayer( oldLayer );
+         SetFilledPolysList( newLayer, shape );
+     }
+ }
+-- 
+2.43.0
+
