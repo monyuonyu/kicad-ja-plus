@@ -12,13 +12,28 @@ from run import SAN_RE, KEEP_BYTES  # noqa: E402
 
 
 def suites(exe):
+    """一番上の組ごとの --run_test の値。無効にされた試験（* の無い物）は流さない:
+    組を名指しすると中の無効な試験まで流れるので、そういう組は有効な子を列挙する"""
     p = subprocess.run([exe, "--list_content"], capture_output=True, text=True, timeout=300)
-    names = []
+    tops = []          # [名前, 有効か, [(子, 有効か)]]
     for ln in (p.stdout + p.stderr).splitlines():
-        m = re.match(r"^(\w+)\*?$", ln.rstrip())   # 字下げの無い行 = 一番上の組（* は既定で流れる物）
-        if m and ln.rstrip().endswith("*"):
-            names.append(m.group(1))
-    return names
+        m = re.match(r"^( *)(\w+)(\*?)$", ln.rstrip())
+        if not m:
+            continue
+        depth, name, on = len(m.group(1)), m.group(2), bool(m.group(3))
+        if depth == 0:
+            tops.append([name, on, []])
+        elif depth == 4 and tops:
+            tops[-1][2].append((name, on))
+    out = []
+    for name, on, kids in tops:
+        if not on:
+            continue
+        if all(k_on for _, k_on in kids):
+            out.append(name)
+        elif any(k_on for _, k_on in kids):
+            out.append(name + "/" + ",".join(k for k, k_on in kids if k_on))
+    return out
 
 
 def main():
@@ -40,7 +55,7 @@ def main():
 
     def one(x):
         exe, s = x
-        name = os.path.basename(exe) + (f":{s}" if s else "")
+        name = os.path.basename(exe) + (f":{s.split('/')[0]}" if s else "")
         args = [exe, "--log_level=error", "--report_level=short"] + ([f"--run_test={s}"] if s else [])
         with tempfile.TemporaryFile() as f:
             p = subprocess.Popen(args, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,

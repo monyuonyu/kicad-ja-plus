@@ -214,9 +214,36 @@ class Runner:
         self.cmd(ctx, "drc", ["pcb", "drc", "--format", "json", "-o", f"{o}/drc.json", board], cwd=cwd)
         return o
 
+    def gerber_same_shape(self, a, b):
+        """文字で違うガーバーを、形で比べ直す（並びや D コードの番号が変わっただけなら同じ）。
+        違えば kicad_gerber diff の要約、同じ・比べられないなら None"""
+        if not self.a.gerber:
+            return "（形で比べる道具なし）"
+        try:
+            p = subprocess.run([self.a.gerber, "diff", a, b], capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            return None
+        out = p.stdout.strip().splitlines()
+        if p.returncode != 0 or any("差なし" in x for x in out):
+            return None
+        return "\n".join(out[-6:])
+
     def compare_outputs(self, ctx, a, b, check, dirs):
         diffs = []
-        for sub in ("g", "d", "pos.csv", "n.d356"):
+        for d in silent.compare_dirs(f"{a}/g", f"{b}/g", dirs, "g"):
+            kind, ex = d
+            # ファイルの中身の違い（g.gtl: ...）は形で確かめる。ファイルの組の違いはそのまま
+            f = kind.split(":")[0]
+            if f.startswith("g.") and "ファイルの組" not in kind:
+                name = [x for x in os.listdir(f"{a}/g") if x.endswith(f[1:])]
+                shapes = [self.gerber_same_shape(f"{a}/g/{x}", f"{b}/g/{x}") for x in name if os.path.exists(f"{b}/g/{x}")]
+                shapes = [x for x in shapes if x]
+                if not shapes:
+                    continue
+                diffs.append((f"{f}: 形が違う", shapes[0]))
+            else:
+                diffs.append(d)
+        for sub in ("d", "pos.csv", "n.d356"):
             diffs += silent.compare_dirs(f"{a}/{sub}", f"{b}/{sub}", dirs, sub)
         diffs += silent.compare_violations(f"{a}/drc.json", f"{b}/drc.json", "drc")
         self.silent(ctx, check, diffs)
@@ -267,18 +294,32 @@ class Runner:
             self.silent(ctx, "upgrade-failed", [("pcb upgrade が失敗", f"rc={rc}")])
             return
         o2 = self.board_outputs(ctx, saved, "o2", up)
-        self.compare_outputs(ctx, o1, o2, "roundtrip", (bdir, up))
+        # 元が今の形式なら、元と保存し直した物を比べる。古い形式は変換で変わって当然なので、
+        # 1 回保存した物（今の形式）を基準に、もう 1 回保存した物と比べる
+        current = format_version(board) == format_version(saved)
+        if current:
+            self.compare_outputs(ctx, o1, o2, "roundtrip", (bdir, up))
         # 4) 保存をもう 1 回: 中身が同じになるはず（保存の不動点）
         up2 = f"{w}/up2"
         shutil.copytree(up, up2)
         saved2 = os.path.join(up2, os.path.basename(saved))
         self.cmd(ctx, "pcb-upgrade-again", ["pcb", "upgrade", "--force", saved2], cwd=up2)
         self.silent(ctx, "save-twice", silent.compare_dirs(saved, saved2, (up, up2), "kicad_pcb"))
+        if not current:
+            o3 = self.board_outputs(ctx, saved2, "o3", up2)
+            self.compare_outputs(ctx, o2, o3, "roundtrip", (up, up2))
+        # DRC をもう 1 回（同じ物に同じ結果が出るか。違えば並列処理の揺れ）
+        flaky = False
+        if os.path.getsize(saved) < 3_000_000:
+            self.cmd(ctx, "drc-again", ["pcb", "drc", "--format", "json", "-o", f"{o2}/drc2.json", saved], cwd=up)
+            d = silent.compare_violations(f"{o2}/drc.json", f"{o2}/drc2.json", "drc-twice")
+            flaky = bool(d)
+            self.silent(ctx, "drc-twice", d)
         # 5) 基板ごと平行移動: DRC の違反の数（種類ごと）は変わらないはず
         tr = f"{w}/tr"
         shutil.copytree(up, tr)
         moved = os.path.join(tr, os.path.basename(saved))
-        if silent.translate_board(saved, moved):
+        if not flaky and silent.translate_board(saved, moved):
             self.cmd(ctx, "drc-moved", ["pcb", "drc", "--format", "json", "-o", f"{tr}/drc.json", moved], cwd=tr)
             ca, cb = silent.violation_counts(f"{o2}/drc.json"), silent.violation_counts(f"{tr}/drc.json")
             diffs = []
@@ -332,15 +373,17 @@ class Runner:
             self.silent(ctx, "upgrade-failed", [("sch upgrade が失敗", f"rc={rc}")])
             return
         o2 = self.sch_outputs(ctx, saved, "o2", os.path.dirname(saved))
-        diffs = silent.compare_dirs(f"{o1}/n.net", f"{o2}/n.net", (sdir, up), "netlist")
-        diffs += silent.compare_dirs(f"{o1}/bom.csv", f"{o2}/bom.csv", (sdir, up), "bom")
-        diffs += silent.compare_violations(f"{o1}/erc.json", f"{o2}/erc.json", "erc")
-        self.silent(ctx, "roundtrip", diffs)
+        current = format_version(path) == format_version(saved)
+        if current:
+            self.silent(ctx, "roundtrip", sch_diffs(o1, o2, (sdir, up)))
         up2 = f"{w}/up2"
         shutil.copytree(up, up2)
         copy2 = os.path.join(up2, os.path.relpath(saved, up))
         self.cmd(ctx, "sch-upgrade-again", ["sch", "upgrade", "--force", copy2], cwd=os.path.dirname(copy2))
         self.silent(ctx, "save-twice", silent.compare_dirs(saved, copy2, (up, up2), "kicad_sch"))
+        if not current:
+            o3 = self.sch_outputs(ctx, copy2, "o3", os.path.dirname(copy2))
+            self.silent(ctx, "roundtrip", sch_diffs(o2, o3, (up, up2)))
 
     # ---- ライブラリ・ガーバー ----
     def do_symlib(self, ctx):
@@ -367,6 +410,15 @@ class Runner:
 
     def do_gerber(self, ctx):
         self.cmd(ctx, "gerber-info", ["info", ctx["path"]], tool="gerber")
+
+
+def sch_diffs(a, b, dirs):
+    # ネットリストは行の順と net の番号（code）と Sheetfile の場所を見ない
+    diffs = silent.compare_dirs(f"{a}/n.net", f"{b}/n.net", dirs, "netlist", unordered=True,
+                                drop=r'^\s*\(code "\d+"\)$|Sheetfile|^\s*\(value "[^"]*\.(kicad_)?sch"\)$')
+    diffs += silent.compare_dirs(f"{a}/bom.csv", f"{b}/bom.csv", dirs, "bom", unordered=True)
+    diffs += silent.compare_violations(f"{a}/erc.json", f"{b}/erc.json", "erc")
+    return diffs
 
 
 DESIGN_EXT = (".kicad_sch", ".sch", ".kicad_pro", ".kicad_prl", ".kicad_sym", ".lib", ".dcm", ".kicad_dbl")

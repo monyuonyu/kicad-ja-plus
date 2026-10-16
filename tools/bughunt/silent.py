@@ -17,9 +17,8 @@ VERSION_RE = re.compile(r"10\.0\.\d+[-\w.+]*")
 
 
 def norm_text(s, dirs=()):
-    for d in dirs:
-        if d:
-            s = s.replace(d, "@DIR@")
+    for d in sorted((d for d in dirs if d), key=len, reverse=True):   # up2 を up より先に
+        s = s.replace(d, "@DIR@")
     for r in DATE_RES:
         s = r.sub("@DATE@", s)
     s = VERSION_RE.sub("@VER@", s)
@@ -33,16 +32,23 @@ def shape(line):
     return line[:80]
 
 
-def compare_text(a, b, dirs=(), name=""):
-    """違えば (種類, 抜粋) を返す。同じなら None"""
+def compare_text(a, b, dirs=(), name="", unordered=False, drop=None):
+    """違えば (種類, 抜粋) を返す。同じなら None。
+    unordered: 行の多重集合で比べる（差の抜粋も並べ替えた物で）。drop: この正規表現に合う行は見ない"""
     if a == b:
         return None
     na, nb = norm_text(a, dirs), norm_text(b, dirs)
     if na == nb:
         return None
     la, lb = na.splitlines(), nb.splitlines()
+    if drop:
+        r = re.compile(drop)
+        la = [x for x in la if not r.search(x)]
+        lb = [x for x in lb if not r.search(x)]
     if sorted(la) == sorted(lb):
         return None       # 並びだけの違いは数えない（中身は同じ）
+    if unordered:
+        la, lb = sorted(la), sorted(lb)
     if len(la) != len(lb):
         kind = f"{name}: 行の数 {'増' if len(lb) > len(la) else '減'}"
     else:
@@ -71,13 +77,13 @@ def read(p):
         return f.read().decode("utf-8", "replace")
 
 
-def compare_dirs(da, db, dirs=(), label=""):
+def compare_dirs(da, db, dirs=(), label="", **kw):
     """フォルダ（または 1 ファイル）どうし。名前で対応させる。違いの一覧 [(種類, 抜粋)]"""
     out = []
     if os.path.isfile(da) or os.path.isfile(db):
         if not (os.path.isfile(da) and os.path.isfile(db)):
             return [(f"{label}: 片方だけに出力", f"{da} {os.path.exists(da)} / {db} {os.path.exists(db)}")]
-        r = compare_text(read(da), read(db), dirs, label)
+        r = compare_text(read(da), read(db), dirs, label, **kw)
         return [r] if r else []
     fa = sorted(os.listdir(da)) if os.path.isdir(da) else []
     fb = sorted(os.listdir(db)) if os.path.isdir(db) else []
@@ -85,10 +91,15 @@ def compare_dirs(da, db, dirs=(), label=""):
         out.append((f"{label}: ファイルの組が違う", f"{sorted(set(fa) ^ set(fb))[:10]}"))
     for f in sorted(set(fa) & set(fb)):
         ext = os.path.splitext(f)[1] or f
-        r = compare_text(read(os.path.join(da, f)), read(os.path.join(db, f)), dirs, f"{label}{ext}")
+        r = compare_text(read(os.path.join(da, f)), read(os.path.join(db, f)), dirs, f"{label}{ext}", **kw)
         if r:
             out.append(r)
     return out
+
+
+# 置き場所やライブラリの表で変わる違反（写した先ではライブラリが見つからない）。比べない
+ENV_TYPES = {"lib_footprint_issues", "lib_footprint_mismatch", "lib_symbol_issues", "lib_symbol_mismatch",
+             "footprint_link_issues", "schematic_parity"}
 
 
 def violations(json_path, positions=True):
@@ -102,11 +113,14 @@ def violations(json_path, positions=True):
     for s in d.get("sheets", []):
         vs += s.get("violations", [])
     for v in vs:
+        if v.get("type") in ENV_TYPES:
+            continue
         items = []
         for it in v.get("items", []):
             p = it.get("pos", {})
-            items.append((it.get("description", ""), round(p.get("x", 0), 3), round(p.get("y", 0), 3)) if positions
-                         else (it.get("description", ""),))
+            # 未接続は、同じ場所のパッドと線のどちらを端に選ぶかが毎回揺れる。場所だけで比べる
+            desc = "" if v.get("type") == "unconnected_items" else it.get("description", "")
+            items.append((desc, round(p.get("x", 0), 3), round(p.get("y", 0), 3)) if positions else (desc,))
         c[(v.get("type"), v.get("severity"), tuple(sorted(items)))] += 1
     return c
 
