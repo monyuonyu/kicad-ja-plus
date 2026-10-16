@@ -1,0 +1,57 @@
+From 01a52083164f4784f4bced6f55fd294d26400033 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Sat, 17 Oct 2026 06:08:51 +0900
+Subject: [PATCH 42/47] Plot options from jobs: do not read fields the job does
+ not have
+
+PlotJobToPlotOpts() static_cast every SVG job to JOB_EXPORT_PCB_SVG and every
+Gerber job to JOB_EXPORT_PCB_GERBERS. fp export svg passes a JOB_FP_EXPORT_SVG
+and pcb export gerber a JOB_EXPORT_PCB_GERBER, so the SVG precision / fit flag
+and the Gerber job file flag were read from unrelated memory (UBSan: load of
+value N, which is not a valid value for type 'bool', on every fp export svg).
+Use dynamic_cast for the optional parts. Still present on master.
+
+Found by tools/bughunt (1006 footprint libraries).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ pcbnew/pcb_plotter.cpp | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/pcbnew/pcb_plotter.cpp b/pcbnew/pcb_plotter.cpp
+index c4e0d125..dc0054a8 100644
+--- a/pcbnew/pcb_plotter.cpp
++++ b/pcbnew/pcb_plotter.cpp
+@@ -393,12 +393,14 @@ void PCB_PLOTTER::PlotJobToPlotOpts( PCB_PLOT_PARAMS& aOpts, JOB_EXPORT_PCB_PLOT
+ {
+     if( aJob->m_plotFormat == JOB_EXPORT_PCB_PLOT::PLOT_FORMAT::GERBER )
+     {
+-        JOB_EXPORT_PCB_GERBERS* gJob = static_cast<JOB_EXPORT_PCB_GERBERS*>( aJob );
++        // pcb export gerber (one layer) passes a JOB_EXPORT_PCB_GERBER, which has no job file flag
++        JOB_EXPORT_PCB_GERBER*  gJob = static_cast<JOB_EXPORT_PCB_GERBER*>( aJob );
++        JOB_EXPORT_PCB_GERBERS* gsJob = dynamic_cast<JOB_EXPORT_PCB_GERBERS*>( aJob );
+         aOpts.SetDisableGerberMacros( gJob->m_disableApertureMacros );
+         aOpts.SetUseGerberProtelExtensions( gJob->m_useProtelFileExtension );
+         aOpts.SetUseGerberX2format( gJob->m_useX2Format );
+         aOpts.SetIncludeGerberNetlistInfo( gJob->m_includeNetlistAttributes );
+-        aOpts.SetCreateGerberJobFile( gJob->m_createJobsFile );
++        aOpts.SetCreateGerberJobFile( gsJob && gsJob->m_createJobsFile );
+         aOpts.SetGerberPrecision( gJob->m_precision );
+         // Always disable plot pad holes
+         aOpts.SetDrillMarksType( DRILL_MARKS::NO_DRILL_SHAPE );
+@@ -419,9 +421,10 @@ void PCB_PLOTTER::PlotJobToPlotOpts( PCB_PLOT_PARAMS& aOpts, JOB_EXPORT_PCB_PLOT
+         }
+     }
+ 
+-    if( aJob->m_plotFormat == JOB_EXPORT_PCB_PLOT::PLOT_FORMAT::SVG )
++    // fp export svg passes a JOB_FP_EXPORT_SVG, which is an SVG plot job but not a
++    // JOB_EXPORT_PCB_SVG: a static_cast read its strings as the precision and fit flags
++    if( JOB_EXPORT_PCB_SVG* svgJob = dynamic_cast<JOB_EXPORT_PCB_SVG*>( aJob ) )
+     {
+-        JOB_EXPORT_PCB_SVG* svgJob = static_cast<JOB_EXPORT_PCB_SVG*>( aJob );
+         aOpts.SetSvgPrecision( svgJob->m_precision );
+         aOpts.SetSvgFitPageToBoard( svgJob->m_fitPageToBoard );
+     }
+-- 
+2.43.0
+

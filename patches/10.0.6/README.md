@@ -29,6 +29,7 @@
 | 0039 | `kicad-cli pcb upgrade` が読めない基板で落ちる（本家 master の修正を持ってきた） | KiCad 全体のバグ探しで見つけた（Eagle の基板を取り込んでから upgrade） |
 | 0040 | 0023 と一緒に入った試験（バリアントの照合）が 10.0 の BOARD_NETLIST_UPDATER と合わずコンパイルできない → 10.0 の形に直して無効にする | バグ探しの ASan ビルドで QA を作ったとき |
 | 0041 | IPC-2581 の出力: 空の文字の節を消したあと、その消えた節を次の追加で読む（ASan: heap-use-after-free）。本家 master も同じ | KiCad 全体のバグ探しで見つけた（16 基板） |
+| 0042 | `fp export svg`・`pcb export gerber` で、その種類に無い設定（SVG の精度など）を関係ない場所から読む。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、フットプリントのライブラリ 1006 件） |
 
 8.0.9 で取り込んだ残りのもの（ルーターの修正 18 件、`drc --refill-zones`、`pcb export stats`、`pcb render`）は 10.0.6 に元から入っている。
 
