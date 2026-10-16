@@ -1,0 +1,51 @@
+From f85d2e1fdd7a4d1113fab84473f637bb7e820205 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Sat, 17 Oct 2026 06:08:16 +0900
+Subject: [PATCH 41/47] IPC-2581 export: forget deleted nodes in the
+ appendNode() shortcut (heap-use-after-free)
+
+addText() and the footprint marking code deleted an empty node with a plain
+delete. When that node was the last appended one, m_lastAppendedNode kept
+pointing at it and the next appendNode() read freed memory (ASan:
+heap-use-after-free in PCB_IO_IPC2581::appendNode). Use deleteNode(), which
+clears the shortcut. Still present on master.
+
+Found by tools/bughunt (16 boards, pcb export ipc2581).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ pcbnew/pcb_io/ipc2581/pcb_io_ipc2581.cpp | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/pcbnew/pcb_io/ipc2581/pcb_io_ipc2581.cpp b/pcbnew/pcb_io/ipc2581/pcb_io_ipc2581.cpp
+index 2c0c946b..60fdbf0e 100644
+--- a/pcbnew/pcb_io/ipc2581/pcb_io_ipc2581.cpp
++++ b/pcbnew/pcb_io/ipc2581/pcb_io_ipc2581.cpp
+@@ -933,10 +933,12 @@ void PCB_IO_IPC2581::addText( wxXmlNode* aContentNode, EDA_TEXT* aText,
+     if( !pts.empty() )
+         push_pts();
+ 
++    // deleteNode() also forgets the node in the appendNode() shortcut; a plain delete left
++    // m_lastAppendedNode dangling and the next appendNode() read freed memory
+     if( text_node->GetChildren() == nullptr )
+     {
+         aContentNode->RemoveChild( text_node );
+-        delete text_node;
++        deleteNode( text_node );
+     }
+ }
+ 
+@@ -3270,8 +3272,8 @@ wxXmlNode* PCB_IO_IPC2581::addPackage( wxXmlNode* aContentNode, FOOTPRINT* aFp )
+         {
+             marking_node->RemoveChild( group_node );
+             layer_node->RemoveChild( marking_node );
+-            delete group_node;
+-            delete marking_node;
++            deleteNode( group_node );     // see addText
++            deleteNode( marking_node );
+         }
+     }
+ 
+-- 
+2.43.0
+
