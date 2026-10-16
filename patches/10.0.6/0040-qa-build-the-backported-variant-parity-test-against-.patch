@@ -1,0 +1,44 @@
+From bfc0e5bf8a0f780eec6be4421a4a0f893bf716e8 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Fri, 16 Oct 2026 23:59:42 +0900
+Subject: [PATCH] qa: build the backported variant parity test against 10.0's
+ BOARD_NETLIST_UPDATER, disabled
+
+The test from the backport of the variant parity MR (patch 0023) used master's
+BOARD_NETLIST_UPDATER( TOOL_MANAGER*, BOARD* ) and did not compile in 10.0,
+which takes the edit frame; with no frame BOARD_COMMIT cannot work headless,
+so the case is kept but disabled.  Found when the ASan bug hunt built the QA.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ qa/tests/pcbnew/test_variant.cpp | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/qa/tests/pcbnew/test_variant.cpp b/qa/tests/pcbnew/test_variant.cpp
+index 454b6a99..63fc62a9 100644
+--- a/qa/tests/pcbnew/test_variant.cpp
++++ b/qa/tests/pcbnew/test_variant.cpp
+@@ -1372,7 +1372,10 @@ BOOST_AUTO_TEST_CASE( Issue23298_BaseFootprintHiddenInNonDefaultVariant )
+ }
+ 
+ 
+-BOOST_AUTO_TEST_CASE( VariantUpdateLeavesSchematicParityClean )
++// The test came with the backport of MR "use selected variant for schematic parity DRC" (patch
++// 0023) and needs master's BOARD_NETLIST_UPDATER( TOOL_MANAGER*, BOARD* ); 10.0 takes the edit
++// frame, and BOARD_COMMIT needs a frame or a tool manager, so it cannot run headless here.
++BOOST_AUTO_TEST_CASE( VariantUpdateLeavesSchematicParityClean, *boost::unit_test::disabled() )
+ {
+     SETTINGS_MANAGER settingsManager;
+     settingsManager.LoadProject( "" );
+@@ -1408,7 +1411,7 @@ BOOST_AUTO_TEST_CASE( VariantUpdateLeavesSchematicParityClean )
+     toolMgr.SetEnvironment( board.get(), nullptr, nullptr, nullptr, nullptr );
+     toolMgr.RegisterTool( new KI_TEST::DUMMY_TOOL() );
+ 
+-    BOARD_NETLIST_UPDATER updater( &toolMgr, board.get() );
++    BOARD_NETLIST_UPDATER updater( nullptr, board.get() ); // 10.0: the frame, see above
+     updater.SetReplaceFootprints( false );
+     updater.SetDeleteUnusedFootprints( false );
+ 
+-- 
+2.43.0
+
