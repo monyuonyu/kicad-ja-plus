@@ -1,0 +1,39 @@
+From 03b849ac7ecb97af8cad6e59e03719fc62f3e49f Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Sat, 17 Oct 2026 06:09:26 +0900
+Subject: [PATCH 44/47] Board statistics: keep the track clearance search from
+ overflowing
+
+ComputeBoardStatistics() passes the running minimum track-to-track clearance,
+initially INT_MAX, to SHAPE::Collide(), which adds half the track width and
+the via radius to it. The signed overflow (UBSan in shape_collisions.cpp) made
+the clearance negative, so most pairs were not measured and the reported
+minimum clearance could be wrong. Cap the search distance. Still present on
+master.
+
+Found by tools/bughunt (1000+ boards, pcb export stats).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ pcbnew/board_statistics_report.cpp | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/pcbnew/board_statistics_report.cpp b/pcbnew/board_statistics_report.cpp
+index a0cb2977..ffb8e856 100644
+--- a/pcbnew/board_statistics_report.cpp
++++ b/pcbnew/board_statistics_report.cpp
+@@ -209,7 +209,10 @@ void ComputeBoardStatistics( BOARD* aBoard, const BOARD_STATISTICS_OPTIONS& aOpt
+ 
+             int  actual = 0;
+             auto trackShapeB = otherTrack->GetEffectiveShape( layer );
+-            bool collide = trackShapeA->Collide( trackShapeB.get(), aData.minClearanceTrackToTrack, &actual );
++            // The running minimum starts at INT_MAX; the collision code adds half widths and
++            // radii to the clearance, which overflowed and turned "no limit" into a negative one
++            int  clearance = std::min( aData.minClearanceTrackToTrack, std::numeric_limits<int>::max() / 4 );
++            bool collide = trackShapeA->Collide( trackShapeB.get(), clearance, &actual );
+ 
+             if( collide )
+                 aData.minClearanceTrackToTrack = std::min( aData.minClearanceTrackToTrack, actual );
+-- 
+2.43.0
+

@@ -31,6 +31,7 @@
 | 0041 | IPC-2581 の出力: 空の文字の節を消したあと、その消えた節を次の追加で読む（ASan: heap-use-after-free）。本家 master も同じ | KiCad 全体のバグ探しで見つけた（16 基板） |
 | 0042 | `fp export svg`・`pcb export gerber` で、その種類に無い設定（SVG の精度など）を関係ない場所から読む。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、フットプリントのライブラリ 1006 件） |
 | 0043 | 基板に載っていない物の裏返しで落ちる（旧形式の .mod の裏面のフットプリントを `fp upgrade`）。本家 master [6a26ce9d](https://gitlab.com/kicad/code/kicad/-/commit/6a26ce9d) の一部を持ってきた | KiCad 全体のバグ探しで見つけた（ASan: SEGV） |
+| 0044 | `pcb export stats` の線どうしの最小の間隔を調べるところで整数があふれ、間隔が正しく出ないことがある。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、1000 基板以上） |
 
 8.0.9 で取り込んだ残りのもの（ルーターの修正 18 件、`drc --refill-zones`、`pcb export stats`、`pcb render`）は 10.0.6 に元から入っている。
 
