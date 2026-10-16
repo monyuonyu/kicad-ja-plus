@@ -1,0 +1,63 @@
+From 2178af50dff2b1fe7712887de14c0e9da4141893 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Sat, 17 Oct 2026 06:09:34 +0900
+Subject: [PATCH 45/47] Altium binary reader: read packed values with memcpy
+
+Altium records are packed, so ALTIUM_BINARY_PARSER::Read<T>() and
+ALTIUM_BINARY_READER::ReadInt16/32() dereferenced misaligned pointers
+(UBSan: load of misaligned address, on most Altium libraries and boards).
+Harmless on x86 but undefined behaviour, and a fault on strict-alignment
+CPUs. Still present on master.
+
+Found by tools/bughunt (Altium .PcbDoc/.PcbLib/.SchLib, about 350 reports).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ common/io/altium/altium_binary_parser.h | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/common/io/altium/altium_binary_parser.h b/common/io/altium/altium_binary_parser.h
+index 4018c844..0b160ce7 100644
+--- a/common/io/altium/altium_binary_parser.h
++++ b/common/io/altium/altium_binary_parser.h
+@@ -28,6 +28,7 @@
+ #include "altium_props_utils.h"
+ 
+ #include <charconv>
++#include <cstring>
+ #include <map>
+ #include <memory>
+ #include <numeric>
+@@ -141,7 +142,8 @@ public:
+ 
+         if( remainingBytes >= sizeof( Type ) )
+         {
+-            Type val = *(Type*) ( m_pos );
++            Type val;
++            std::memcpy( &val, m_pos, sizeof( Type ) );   // records are packed: m_pos is not aligned
+             m_pos += sizeof( Type );
+             return val;
+         }
+@@ -356,7 +358,8 @@ public:
+         if( m_position + sizeof( int32_t ) > m_data.size() )
+             throw std::out_of_range( "ALTIUM_BINARY_READER: out of range" );
+ 
+-        int32_t value = *reinterpret_cast<const int32_t*>( &m_data[m_position] );
++        int32_t value;
++        std::memcpy( &value, &m_data[m_position], sizeof( value ) );
+         m_position += sizeof( int32_t );
+         return value;
+     }
+@@ -366,7 +369,8 @@ public:
+         if( m_position + sizeof( int16_t ) > m_data.size() )
+             throw std::out_of_range( "ALTIUM_BINARY_READER: out of range" );
+ 
+-        int16_t value = *reinterpret_cast<const int16_t*>( &m_data[m_position] );
++        int16_t value;
++        std::memcpy( &value, &m_data[m_position], sizeof( value ) );
+         m_position += sizeof( int16_t );
+         return value;
+     }
+-- 
+2.43.0
+
