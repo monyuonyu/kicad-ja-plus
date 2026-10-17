@@ -1,0 +1,35 @@
+From 4598e374e32ea7b82ba4704047d07a38ac4246ff Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Sun, 18 Oct 2026 07:40:01 +0900
+Subject: [PATCH 49/49] Hatch lines: take the segment midpoint in 64 bits
+
+GenerateHatchLines() added two int coordinates to find a midpoint, which
+overflows when a zone outline reaches beyond about +-1.07 m (seen on real
+boards with a stray far-away vertex; UBSan in shape_poly_set.cpp). Still
+present on master.
+
+Found by tools/bughunt (29 boards).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ libs/kimath/src/geometry/shape_poly_set.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/libs/kimath/src/geometry/shape_poly_set.cpp b/libs/kimath/src/geometry/shape_poly_set.cpp
+index a97fb6fc..e837d8b2 100644
+--- a/libs/kimath/src/geometry/shape_poly_set.cpp
++++ b/libs/kimath/src/geometry/shape_poly_set.cpp
+@@ -3602,7 +3602,9 @@ const std::vector<SEG> SHAPE_POLY_SET::GenerateHatchLines( const std::vector<dou
+ 
+                 SEG candidate( p1, p2 );
+ 
+-                VECTOR2I mid( ( candidate.A.x + candidate.B.x ) / 2, ( candidate.A.y + candidate.B.y ) / 2 );
++                // in 64 bits: the sum overflows int when the outline reaches beyond about 1 m
++                VECTOR2I mid( ( (int64_t) candidate.A.x + candidate.B.x ) / 2,
++                              ( (int64_t) candidate.A.y + candidate.B.y ) / 2 );
+ 
+                 // Check if segment is inside the polygon by checking its middle point
+                 if( Contains( mid, -1, 1, true ) )
+-- 
+2.43.0
+

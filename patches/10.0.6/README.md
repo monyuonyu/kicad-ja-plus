@@ -36,6 +36,7 @@
 | 0046 | Eagle の取り込み（画面なし）: 対応する層の無い物を「UNDEFINED」層に置き、取り込んだ基板が開けない。本家 master [ec6d46d3](https://gitlab.com/kicad/code/kicad/-/commit/ec6d46d38db72d02798524f1c630a9c1d17d91b3) を持ってきた | KiCad 全体のバグ探しで見つけた（Eagle の基板 141 件が読み直せなかった） |
 | 0047 | ガーバーを図形にするとき、消す側（%LPC%）の図形が続くと 1 個ごとに引き算して、大きなシルクで 5 分以上かかる（まとめて 1 回に。1 秒未満）。本家 master（kicad-cli gerber）も同じ | KiCad 全体のバグ探しで見つけた（kicad_gerber info の時間切れ） |
 | 0048 | Eagle の回路図の取り込み: 円弧の半径を int で 2 乗して、半径およそ 4.6 mm を超えるとあふれる。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、Eagle の .lbr のシンボル） |
+| 0049 | ゾーンの網目の線の中点を 64 ビットで（外形が約 1 m より遠くまであるとあふれる）。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、29 基板） |
 
 8.0.9 で取り込んだ残りのもの（ルーターの修正 18 件、`drc --refill-zones`、`pcb export stats`、`pcb render`）は 10.0.6 に元から入っている。
 
