@@ -141,6 +141,18 @@ def compare_violations(a, b, label, positions=True):
     return [(kind, ex)]
 
 
+def compare_violation_counts(a, b, label):
+    """違反の数を種類ごとに比べる。DRC は同じ物を何度かけても、どの組を代表に出すか
+    （マスクの橋渡し・間隔）が並列処理で揺れるので、場所までは比べない"""
+    ca, cb = violation_counts(a), violation_counts(b)
+    if ca is None or cb is None:
+        return [(f"{label}: 片方だけ読めない", f"{a} / {b}")] if (ca is None) != (cb is None) else []
+    if ca == cb:
+        return []
+    ch = [f"{k}:{ca.get(k, 0)}→{cb.get(k, 0)}" for k in sorted(set(ca) | set(cb), key=str) if ca.get(k, 0) != cb.get(k, 0)]
+    return [(f"{label}: 違反の数が変わる [{','.join(sorted(x.split(':')[0] for x in ch)[:4])}]", " ".join(ch))]
+
+
 def violation_counts(path):
     v = violations(path, positions=False)
     if v is None:

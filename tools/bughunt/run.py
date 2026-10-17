@@ -211,7 +211,7 @@ class Runner:
         self.cmd(ctx, "drill", ["pcb", "export", "drill", "-o", f"{o}/d/", board], cwd=cwd)
         self.cmd(ctx, "pos", ["pcb", "export", "pos", "--format", "csv", "-o", f"{o}/pos.csv", board], cwd=cwd)
         self.cmd(ctx, "ipcd356", ["pcb", "export", "ipcd356", "-o", f"{o}/n.d356", board], cwd=cwd)
-        self.cmd(ctx, "drc", ["pcb", "drc", "--format", "json", "-o", f"{o}/drc.json", board], cwd=cwd)
+        self.cmd(ctx, "drc", ["pcb", "drc", "--all-track-errors", "--format", "json", "-o", f"{o}/drc.json", board], cwd=cwd)
         return o
 
     def gerber_same_shape(self, a, b):
@@ -245,7 +245,7 @@ class Runner:
                 diffs.append(d)
         for sub in ("d", "pos.csv", "n.d356"):
             diffs += silent.compare_dirs(f"{a}/{sub}", f"{b}/{sub}", dirs, sub)
-        diffs += silent.compare_violations(f"{a}/drc.json", f"{b}/drc.json", "drc")
+        diffs += silent.compare_violation_counts(f"{a}/drc.json", f"{b}/drc.json", "drc")
         self.silent(ctx, check, diffs)
 
     def do_pcb(self, ctx, board=None):
@@ -311,8 +311,8 @@ class Runner:
         # DRC をもう 1 回（同じ物に同じ結果が出るか。違えば並列処理の揺れ）
         flaky = False
         if os.path.getsize(saved) < 3_000_000:
-            self.cmd(ctx, "drc-again", ["pcb", "drc", "--format", "json", "-o", f"{o2}/drc2.json", saved], cwd=up)
-            d = silent.compare_violations(f"{o2}/drc.json", f"{o2}/drc2.json", "drc-twice")
+            self.cmd(ctx, "drc-again", ["pcb", "drc", "--all-track-errors", "--format", "json", "-o", f"{o2}/drc2.json", saved], cwd=up)
+            d = silent.compare_violation_counts(f"{o2}/drc.json", f"{o2}/drc2.json", "drc-twice")
             flaky = bool(d)
             self.silent(ctx, "drc-twice", d)
         # 5) 基板ごと平行移動: DRC の違反の数（種類ごと）は変わらないはず
@@ -320,7 +320,7 @@ class Runner:
         shutil.copytree(up, tr)
         moved = os.path.join(tr, os.path.basename(saved))
         if not flaky and silent.translate_board(saved, moved):
-            self.cmd(ctx, "drc-moved", ["pcb", "drc", "--format", "json", "-o", f"{tr}/drc.json", moved], cwd=tr)
+            self.cmd(ctx, "drc-moved", ["pcb", "drc", "--all-track-errors", "--format", "json", "-o", f"{tr}/drc.json", moved], cwd=tr)
             ca, cb = silent.violation_counts(f"{o2}/drc.json"), silent.violation_counts(f"{tr}/drc.json")
             diffs = []
             if ca is not None and cb is not None and ca != cb:
