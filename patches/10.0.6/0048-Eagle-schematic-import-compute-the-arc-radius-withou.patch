@@ -1,0 +1,36 @@
+From 3ea4afe55a5900a3f5a615ce6aa8193145a059fb Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Sun, 18 Oct 2026 07:39:52 +0900
+Subject: [PATCH 48/49] Eagle schematic import: compute the arc radius without
+ int overflow
+
+loadSymbolWire() squared the center-to-start distance in int, which
+overflows for radii above about 4.6 mm (100 nm units), so the radius used for
+flat-capped thick arcs was garbage (UBSan: signed integer overflow in
+sch_io_eagle.cpp). Use EuclideanNorm(). Still present on master.
+
+Found by tools/bughunt (Eagle .lbr symbol conversion).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ eeschema/sch_io/eagle/sch_io_eagle.cpp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/eeschema/sch_io/eagle/sch_io_eagle.cpp b/eeschema/sch_io/eagle/sch_io_eagle.cpp
+index 57792481..dc8a1601 100644
+--- a/eeschema/sch_io/eagle/sch_io_eagle.cpp
++++ b/eeschema/sch_io/eagle/sch_io_eagle.cpp
+@@ -2701,8 +2701,8 @@ SCH_ITEM* SCH_IO_EAGLE::loadSymbolWire( std::unique_ptr<LIB_SYMBOL>& aSymbol,
+     {
+         SCH_SHAPE* arc = new SCH_SHAPE( SHAPE_T::ARC, LAYER_DEVICE );
+         VECTOR2I   center = ConvertArcCenter( begin, end, *aWire->curve );
+-        double     radius = sqrt( ( ( center.x - begin.x ) * ( center.x - begin.x ) ) +
+-                                  ( ( center.y - begin.y ) * ( center.y - begin.y ) ) );
++        // in double: the squares overflow int for radii above about 4.6 mm (schematic units)
++        double     radius = ( center - begin ).EuclideanNorm();
+ 
+         arc->SetParent( aSymbol.get() );
+ 
+-- 
+2.43.0
+
