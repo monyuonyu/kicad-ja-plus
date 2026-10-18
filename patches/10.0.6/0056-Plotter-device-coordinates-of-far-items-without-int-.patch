@@ -1,0 +1,35 @@
+From c445a808de682274983ffc426ee95c3cc3b72f75 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Sun, 18 Oct 2026 16:05:18 +0900
+Subject: [PATCH 56/59] Plotter: device coordinates of far items without int
+ overflow
+
+PLOTTER::userToDeviceCoordinates() subtracted the plot offset in int before
+scaling to double (UBSan in vector2d.h:475 from fp export svg of footprints
+with huge coordinates). Subtract in double; the result is the same for
+anything that fits.
+
+Found by tools/bughunt (kicad-ja-plus, run 39090891417).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ common/plotters/plotter.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/common/plotters/plotter.cpp b/common/plotters/plotter.cpp
+index 130bc437f..81e86b386 100644
+--- a/common/plotters/plotter.cpp
++++ b/common/plotters/plotter.cpp
+@@ -92,7 +92,8 @@ bool PLOTTER::OpenFile( const wxString& aFullFilename )
+ 
+ VECTOR2D PLOTTER::userToDeviceCoordinates( const VECTOR2I& aCoordinate )
+ {
+-    VECTOR2I pos = aCoordinate - m_plotOffset;
++    // In double: an item far from the plot offset can be more than INT_MAX away from it
++    VECTOR2D pos = VECTOR2D( aCoordinate ) - VECTOR2D( m_plotOffset );
+ 
+     double x = pos.x * m_plotScale;
+     double y = ( m_paperSize.y - pos.y * m_plotScale );
+-- 
+2.43.0
+
