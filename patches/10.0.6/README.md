@@ -48,6 +48,7 @@
 | 0058 | `pcb export stats` の線どうしの最小の間隔: 全部の組を図形の当たり判定で比べ、相手の図形も組ごとに作り直していて、大きな基板で 10 分を超える（0044 の後は全部の組を測るので）。図形と箱は 1 回だけ作り、箱どうしが今の最小より離れた組は飛ばす（図形は箱より近づけないので結果は同じ） | KiCad 全体のバグ探しで見つけた（`pcb export stats` の時間切れ） |
 | 0059 | 単体試験の未定義動作 3 つ: 列挙型に範囲外の -1 を入れる（test_property）、配線の設定なしでフットプリントを引きずり null を読んで落ちる（PNSComponentDraggerBasicDrag、SIGSEGV）、基板の無いライブラリのフットプリントで FootprintNeedsUpdate を呼び null の BOARD& を作る（Altium・CADSTAR・Eagle の取り込みの試験） | KiCad 全体のバグ探しで見つけた（UBSan、qa_common・qa_pcbnew） |
 | 0060 | 沿面距離の DRC: 重なった 2 つの円（基板の丸い切り欠きなど）の間に、存在しない接線を作る。平方根が NaN になり、その点が INT_MIN の節になって、後の計算が軒並みあふれる。在る接線だけ作る。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、qa_pcbnew の CreepageOverlapping の試験 2 つ） |
+| 0061 | 円の最近点（CIRCLE::NearestPoint）: ほぼまっすぐな円弧の遠い中心との差を int で取ってあふれる。収まらないときは double で。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、DRC・DRC の塗り直し） |
 
 バグ探し（回 39090891417）で見つけて、直していないもの:
 

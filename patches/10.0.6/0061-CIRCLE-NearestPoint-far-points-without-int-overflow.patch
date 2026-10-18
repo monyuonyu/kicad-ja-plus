@@ -1,0 +1,48 @@
+From 4ad5c13f605f3b1067c474e87ec5527989888c5c Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Sun, 18 Oct 2026 21:39:56 +0900
+Subject: [PATCH 61/62] CIRCLE::NearestPoint: far points without int overflow
+
+NearestPoint( VECTOR2I ) subtracted the centre in int. SHAPE_ARC::NearestPoints()
+calls it with the centre of the other arc, which for a nearly straight arc is
+more than INT_MAX away (UBSan in vector2d.h:444/475 via circle.cpp:199/205 from
+drc and drc-fill). Resize in double and clamp when the difference does not fit
+in int; the int path is unchanged otherwise.
+
+Found by tools/bughunt (kicad-ja-plus, run 39107230873).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ libs/kimath/src/geometry/circle.cpp | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/libs/kimath/src/geometry/circle.cpp b/libs/kimath/src/geometry/circle.cpp
+index 9699b4584..7eb66191f 100644
+--- a/libs/kimath/src/geometry/circle.cpp
++++ b/libs/kimath/src/geometry/circle.cpp
+@@ -196,6 +196,22 @@ bool CIRCLE::Contains( const VECTOR2I& aP ) const
+ 
+ VECTOR2I CIRCLE::NearestPoint( const VECTOR2I& aP ) const
+ {
++    const int64_t dx = int64_t( aP.x ) - Center.x;
++    const int64_t dy = int64_t( aP.y ) - Center.y;
++    constexpr int64_t lo = std::numeric_limits<int>::lowest();
++    constexpr int64_t hi = std::numeric_limits<int>::max();
++
++    // A point more than INT_MAX from the centre (the centre of a nearly straight arc): aP - Center
++    // would overflow, so resize in double and clamp
++    if( dx < lo || dx > hi || dy < lo || dy > hi )
++    {
++        const double len = std::hypot( double( dx ), double( dy ) );
++        const double x = Center.x + dx * ( Radius / len );
++        const double y = Center.y + dy * ( Radius / len );
++
++        return VECTOR2I( KiROUND( x, true ), KiROUND( y, true ) );
++    }
++
+     VECTOR2I vec = aP - Center;
+ 
+     // Handle special case where aP is equal to this circle's center
+-- 
+2.43.0
+
