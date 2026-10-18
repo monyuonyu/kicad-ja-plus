@@ -48,6 +48,11 @@
 | 0058 | `pcb export stats` の線どうしの最小の間隔: 全部の組を図形の当たり判定で比べ、相手の図形も組ごとに作り直していて、大きな基板で 10 分を超える（0044 の後は全部の組を測るので）。図形と箱は 1 回だけ作り、箱どうしが今の最小より離れた組は飛ばす（図形は箱より近づけないので結果は同じ） | KiCad 全体のバグ探しで見つけた（`pcb export stats` の時間切れ） |
 | 0059 | 単体試験の未定義動作 3 つ: 列挙型に範囲外の -1 を入れる（test_property）、配線の設定なしでフットプリントを引きずり null を読んで落ちる（PNSComponentDraggerBasicDrag、SIGSEGV）、基板の無いライブラリのフットプリントで FootprintNeedsUpdate を呼び null の BOARD& を作る（Altium・CADSTAR・Eagle の取り込みの試験） | KiCad 全体のバグ探しで見つけた（UBSan、qa_common・qa_pcbnew） |
 
+バグ探し（回 39090891417）で見つけて、直していないもの:
+
+- 時間切れ（どれも結果は正しく、重いだけ）: 大きな面付けの基板の DRC・DRC の塗り直し・STEP（ergosnm_plate_panel）、Eagle の大きな基板の DRC の塗り直し、旧形式の大きなシンボルのライブラリの `sym upgrade`（opendous.lib）、大きなペーストのガーバーの `gerber info`。
+- 座標の端（±2.1 m 近く）にある物どうしの整数のあふれのうち、文字の描画（stroke_font.cpp・font.cpp）、多角形の移動（SHAPE_LINE_CHAIN::Move）、2 乗の距離が 64 ビットに入らないもの（SEG::SquaredDistance）。どれも壊れた・あり得ない座標のファイルだけで起き、VECTOR2I の引き算そのものの意味は変えていない（全体で使われているので）。
+
 8.0.9 で取り込んだ残りのもの（ルーターの修正 18 件、`drc --refill-zones`、`pcb export stats`、`pcb render`）は 10.0.6 に元から入っている。
 
 ## 本家の MR から取り込んだもの
