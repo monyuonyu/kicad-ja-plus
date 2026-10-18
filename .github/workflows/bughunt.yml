@@ -168,7 +168,10 @@ jobs:
       - name: Run the unit tests
         if: matrix.shard == 'qa'
         run: |
-          xvfb-run -a python3 tools/bughunt/run_qa.py --out out --jobs 4 --timeout 2400 \
+          # 単体試験は大きな基板を何枚も読む組があり 3.5GB では足りない（MultichannelTool など 5 組が
+          # 上限で止まっていた）。2 並列 × 7GB にする
+          export ASAN_OPTIONS="${ASAN_OPTIONS/hard_rss_limit_mb=3500/hard_rss_limit_mb=7000}"
+          xvfb-run -a python3 tools/bughunt/run_qa.py --out out --jobs 2 --timeout 2400 \
             $(find "$BUILD/qa/tests" -maxdepth 2 -type f -executable -name 'qa_*' | sort)
 
       - name: Short report of this shard

@@ -11,6 +11,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from run import SAN_RE, KEEP_BYTES  # noqa: E402
 
 
+# サニタイザの下では成り立たない試験（壊れてはいない）。理由つきで外す
+SKIP = {
+    # 100 ms 以内に終わるかを測る試験。ASan の下では 2〜3 倍遅くなるので落ちる（実測 116 ms）
+    "TextEvalParserIntegration/RealWorldPerformance": "ASan の下では時間の上限を超える",
+}
+
+
 def suites(exe):
     """一番上の組ごとの --run_test の値。無効にされた試験（* の無い物）は流さない:
     組を名指しすると中の無効な試験まで流れるので、そういう組は有効な子を列挙する"""
@@ -24,7 +31,7 @@ def suites(exe):
         if depth == 0:
             tops.append([name, on, []])
         elif depth == 4 and tops:
-            tops[-1][2].append((name, on))
+            tops[-1][2].append((name, on and f"{tops[-1][0]}/{name}" not in SKIP))
     out = []
     for name, on, kids in tops:
         if not on:
