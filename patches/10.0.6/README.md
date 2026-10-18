@@ -50,6 +50,7 @@
 | 0060 | 沿面距離の DRC: 重なった 2 つの円（基板の丸い切り欠きなど）の間に、存在しない接線を作る。平方根が NaN になり、その点が INT_MIN の節になって、後の計算が軒並みあふれる。在る接線だけ作る。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、qa_pcbnew の CreepageOverlapping の試験 2 つ） |
 | 0061 | 円の最近点（CIRCLE::NearestPoint）: ほぼまっすぐな円弧の遠い中心との差を int で取ってあふれる。収まらないときは double で。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、DRC・DRC の塗り直し） |
 | 0062 | `pcb export stats` の線どうしの最小の間隔（0058 の続き）: 箱で絞っても全部の組を見ていて、線 2 万 6 千本の基板で 16 秒（検査つきのビルドでは 3 分を超える）。箱の左端の順に並べ、今の最小より右に離れたら打ち切る。結果は同じ | KiCad 全体のバグ探しで見つけた（`pcb export stats` の時間切れ、0058 の後も残った） |
+| 0063 | 回路図のシートの道筋（SCH_SHEET_PATH::Path()）の後回しの記憶を、接続の計算の並列の処理が同時に作り直してメモリを壊す（ASan: heap-buffer-overflow）。本家 master [525fc9ef](https://gitlab.com/kicad/code/kicad/-/commit/525fc9ef9) を持ってきた | KiCad 全体のバグ探しで見つけた（qa_eeschema Issue22864AlignSheetPins、たまに起きる） |
 
 バグ探し（回 39090891417）で見つけて、直していないもの:
 

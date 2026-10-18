@@ -1,0 +1,286 @@
+From 3351885452a192497b07f1d70814fc97e77f6b42 Mon Sep 17 00:00:00 2001
+From: Seth Hillbrand <seth@kipro-pcb.com>
+Date: Mon, 3 Aug 2026 12:52:47 -0700
+Subject: [PATCH] Fix the data race in SCH_SHEET_PATH::Path() (backport of
+ master 525fc9ef)
+
+We were trying to speed up access to deeply nested caches.  But
+connectivity threads could call it concurrently would potentially
+corrupt memory.  This was detected in an ASAN run.
+
+Instead, we now cache this on Rehash() and store it in each path so that
+Path() is const.
+
+Assisted by: GLM
+
+Upstream commit 525fc9ef9 by Seth Hillbrand. Found again by tools/bughunt
+(kicad-ja-plus, run 39114888701): heap-buffer-overflow in KIID_PATH copy from
+the connectivity threads in qa_eeschema Issue22864AlignSheetPins.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ eeschema/sch_field.cpp                    | 14 +++--
+ eeschema/sch_sheet_path.cpp               | 68 +++++++++++-----------
+ eeschema/sch_sheet_path.h                 | 15 ++---
+ qa/tests/eeschema/test_sch_sheet_path.cpp | 69 +++++++++++++++++++++++
+ 4 files changed, 122 insertions(+), 44 deletions(-)
+
+diff --git a/eeschema/sch_field.cpp b/eeschema/sch_field.cpp
+index d60b5adac..1127b5e7d 100644
+--- a/eeschema/sch_field.cpp
++++ b/eeschema/sch_field.cpp
+@@ -266,10 +266,16 @@ wxString SCH_FIELD::GetShownText( bool aAllowExtraText, int aDepth ) const
+         const SCH_SHEET_PATH& currentSheet = schematic->CurrentSheet();
+         wxString variantName = schematic->GetCurrentVariant();
+ 
+-        wxLogTrace( traceSchFieldRendering,
+-                    "GetShownText (no path arg): field=%s, current sheet path='%s', variant='%s', size=%zu, empty=%d",
+-                    GetName(), currentSheet.Path().AsString(), variantName, currentSheet.size(),
+-                    currentSheet.empty() ? 1 : 0 );
++        // Path() builds a KIID_PATH, so keep it off the render path unless the trace is on
++        if( wxLog::IsAllowedTraceMask( traceSchFieldRendering ) )
++        {
++            wxLogTrace( traceSchFieldRendering,
++                        "GetShownText (no path arg): field=%s, current sheet path='%s', variant='%s', "
++                        "size=%zu, empty=%d",
++                        GetName(), currentSheet.Path().AsString(), variantName, currentSheet.size(),
++                        currentSheet.empty() ? 1 : 0 );
++        }
++
+         return GetShownText( &currentSheet, aAllowExtraText, aDepth, variantName );
+     }
+     else
+diff --git a/eeschema/sch_sheet_path.cpp b/eeschema/sch_sheet_path.cpp
+index 718241e9b..e2d4e1934 100644
+--- a/eeschema/sch_sheet_path.cpp
++++ b/eeschema/sch_sheet_path.cpp
+@@ -170,8 +170,7 @@ SCH_SHEET_PATH& SCH_SHEET_PATH::operator=( SCH_SHEET_PATH&& aOther )
+     m_virtualPageNumber  = aOther.m_virtualPageNumber;
+     m_current_hash       = aOther.m_current_hash;
+     m_cached_page_number = aOther.m_cached_page_number;
+-    m_cached_path_valid  = aOther.m_cached_path_valid;
+-    m_cached_path        = std::move( aOther.m_cached_path );
++    m_path               = std::move( aOther.m_path );
+ 
+     m_recursion_test_cache = std::move( aOther.m_recursion_test_cache );
+ 
+@@ -198,21 +197,51 @@ void SCH_SHEET_PATH::initFromOther( const SCH_SHEET_PATH& aOther )
+     m_virtualPageNumber  = aOther.m_virtualPageNumber;
+     m_current_hash       = aOther.m_current_hash;
+     m_cached_page_number = aOther.m_cached_page_number;
+-    m_cached_path_valid  = aOther.m_cached_path_valid;
+-    m_cached_path        = aOther.m_cached_path;
++    m_path               = aOther.m_path;
+ 
+     // Note: don't copy m_recursion_test_cache as it is slow and we want std::vector<SCH_SHEET_PATH>
+     // to be very fast to construct for use in the connectivity algorithm.
+     m_recursion_test_cache.clear();
+ }
+ 
++
++void SCH_SHEET_PATH::push_back( SCH_SHEET* aSheet )
++{
++    m_sheets.push_back( aSheet );
++
++    // hash_combine folds sequentially and the path only ever grows at the end, so extend both
++    // instead of walking the whole list again.  Hierarchy walks push and pop constantly.
++    hash_combine( m_current_hash, aSheet->m_Uuid.Hash() );
++
++    // A virtual root carries the nil UUID and does not belong in the path
++    if( m_sheets.size() > 1 || aSheet->m_Uuid != niluuid )
++        m_path.push_back( aSheet->m_Uuid );
++}
++
++
+ void SCH_SHEET_PATH::Rehash()
+ {
+     m_current_hash = 0;
+-    m_cached_path_valid = false;
++
++    // Keep the path built here rather than lazily in Path().  Path() is called from the parallel
++    // connectivity workers on sheet paths they share, and a lazy fill races.  Retains capacity, so
++    // the repeated push_back/pop_back of a hierarchy walk does not reallocate.
++    m_path.clear();
+ 
+     for( SCH_SHEET* sheet : m_sheets )
+         hash_combine( m_current_hash, sheet->m_Uuid.Hash() );
++
++    if( m_sheets.empty() )
++        return;
++
++    m_path.reserve( m_sheets.size() );
++
++    // A virtual root carries the nil UUID and does not belong in the path
++    if( m_sheets[0]->m_Uuid != niluuid )
++        m_path.push_back( m_sheets[0]->m_Uuid );
++
++    for( size_t i = 1; i < m_sheets.size(); i++ )
++        m_path.push_back( m_sheets[i]->m_Uuid );
+ }
+ 
+ 
+@@ -459,34 +488,7 @@ wxString SCH_SHEET_PATH::PathAsString() const
+ 
+ KIID_PATH SCH_SHEET_PATH::Path() const
+ {
+-    if( m_cached_path_valid )
+-        return m_cached_path;
+-
+-    m_cached_path.clear();
+-    size_t size = m_sheets.size();
+-
+-    if( m_sheets.empty() )
+-    {
+-        m_cached_path_valid = true;
+-        return m_cached_path;
+-    }
+-
+-    if( m_sheets[0]->m_Uuid != niluuid )
+-    {
+-        m_cached_path.reserve( size );
+-        m_cached_path.push_back( m_sheets[0]->m_Uuid );
+-    }
+-    else
+-    {
+-        // Skip the virtual root
+-        m_cached_path.reserve( size - 1 );
+-    }
+-
+-    for( size_t i = 1; i < size; i++ )
+-        m_cached_path.push_back( m_sheets[i]->m_Uuid );
+-
+-    m_cached_path_valid = true;
+-    return m_cached_path;
++    return m_path;
+ }
+ 
+ 
+diff --git a/eeschema/sch_sheet_path.h b/eeschema/sch_sheet_path.h
+index 87c1caa0b..54db57611 100644
+--- a/eeschema/sch_sheet_path.h
++++ b/eeschema/sch_sheet_path.h
+@@ -275,11 +275,7 @@ public:
+     }
+ 
+     /// Forwarded method from std::vector
+-    void push_back( SCH_SHEET* aSheet )
+-    {
+-        m_sheets.push_back( aSheet );
+-        Rehash();
+-    }
++    void push_back( SCH_SHEET* aSheet );
+ 
+     /// Forwarded method from std::vector
+     size_t size() const { return m_sheets.size(); }
+@@ -404,6 +400,10 @@ public:
+      * Get the sheet path as an #KIID_PATH.
+      *
+      * @note This #KIID_PATH includes the root sheet UUID prefixed to the path.
++     *
++     * @note Returns state built by Rehash(), so like GetCurrentHash() it goes stale if a sheet's
++     *       UUID changes without a Rehash().  Reading it writes nothing, which is what lets the
++     *       parallel connectivity workers call it on a sheet path they share.
+      */
+     KIID_PATH Path() const;
+ 
+@@ -551,8 +551,9 @@ protected:
+ 
+     size_t                  m_current_hash;
+     mutable wxString        m_cached_page_number;
+-    mutable bool            m_cached_path_valid = false;
+-    mutable KIID_PATH       m_cached_path;
++
++    /// The UUID path of m_sheets, kept in step with it by Rehash().
++    KIID_PATH               m_path;
+ 
+     int m_virtualPageNumber;           ///< Page numbers are maintained by the sheet load order.
+ 
+diff --git a/qa/tests/eeschema/test_sch_sheet_path.cpp b/qa/tests/eeschema/test_sch_sheet_path.cpp
+index bbca73e0a..5e0250a2c 100644
+--- a/qa/tests/eeschema/test_sch_sheet_path.cpp
++++ b/qa/tests/eeschema/test_sch_sheet_path.cpp
+@@ -39,7 +39,9 @@
+ #include <sch_sheet.h>
+ #include <schematic.h>
+ 
++#include <atomic>
+ #include <sstream>
++#include <thread>
+ 
+ class TEST_SCH_SHEET_PATH_FIXTURE
+ {
+@@ -224,4 +226,71 @@ BOOST_AUTO_TEST_CASE( PathHumanReadableWithSlashes )
+ }
+ 
+ 
++/**
++ * Check that Path() answers from the current sheet list rather than from stale state.
++ */
++BOOST_AUTO_TEST_CASE( PathFollowsSheetListChanges )
++{
++    const KIID_PATH before = m_linear.Path();
++
++    BOOST_REQUIRE_EQUAL( before.size(), 3u );
++
++    m_linear.push_back( &m_sheets[3] );
++
++    const KIID_PATH grown = m_linear.Path();
++
++    BOOST_CHECK_EQUAL( grown.size(), 4u );
++    BOOST_CHECK( grown != before );
++
++    m_linear.pop_back();
++
++    BOOST_CHECK( m_linear.Path() == before );
++}
++
++
++/**
++ * The parallel connectivity workers all resolve names against sheet paths they share, so Path()
++ * has to stay correct when several threads reach the same path at once.  It used to fill a lazy
++ * member cache, and concurrent fills reallocated that buffer under each other.
++ */
++BOOST_AUTO_TEST_CASE( PathIsSafeOnSharedPaths )
++{
++    // Copy before asking m_linear for its path: a lazily filled cache would otherwise come
++    // across already populated and the threads would never race to fill it
++    std::vector<SCH_SHEET_PATH> shared( 4000, m_linear );
++
++    const KIID_PATH expected = m_linear.Path();
++
++    unsigned threadCount = std::max( 4u, std::min( 8u, std::thread::hardware_concurrency() ) );
++
++    std::atomic<unsigned> live( 0 );
++    std::atomic<unsigned> mismatches( 0 );
++    std::vector<std::thread> threads;
++
++    for( unsigned ii = 0; ii < threadCount; ++ii )
++    {
++        threads.emplace_back(
++                [&]()
++                {
++                    // Walk in step with the other threads so they collide on the same path
++                    live.fetch_add( 1 );
++
++                    while( live.load() < threadCount )
++                        std::this_thread::yield();
++
++                    for( const SCH_SHEET_PATH& path : shared )
++                    {
++                        if( path.Path() != expected )
++                            mismatches.fetch_add( 1 );
++                    }
++                } );
++    }
++
++    for( std::thread& thread : threads )
++        thread.join();
++
++    BOOST_CHECK_EQUAL( mismatches.load(), 0u );
++}
++
++
+ BOOST_AUTO_TEST_SUITE_END()
+-- 
+2.43.0
+
