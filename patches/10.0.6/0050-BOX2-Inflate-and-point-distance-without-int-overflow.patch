@@ -1,0 +1,250 @@
+From 133ecd438115aeeae031cdf01ce563401d64d382 Mon Sep 17 00:00:00 2001
+From: Seth Hillbrand <seth@kipro-pcb.com>
+Date: Tue, 29 Sep 2026 06:49:00 -0700
+Subject: [PATCH 50/59] BOX2: Inflate and point distance without int overflow
+ (backport of master 6eaa6bba)
+
+Upstream commit 6eaa6bba6 "Fix BOX2 point distance and Inflate" by Seth Hillbrand.
+Inflate() computed -2 * dx and m_Pos -= dx in int and wrapped for boxes near the
+edge of the coordinate range (UBSan in box2.h:562-603 from SVG plotting of
+footprints with huge coordinates). The upstream fix widens to 64 bits and
+saturates; SquaredDistance() also used the wrong far edge.
+The new test in test_shape_arc.cpp is left out (it depends on other master changes).
+
+Found by tools/bughunt (kicad-ja-plus, run 39090891417).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ libs/kimath/include/math/box2.h         | 120 +++++++++++-------------
+ libs/kimath/src/geometry/shape.cpp      |   2 +-
+ qa/tests/libs/kimath/math/test_box2.cpp |  58 ++++++++++++
+ 3 files changed, 112 insertions(+), 68 deletions(-)
+
+diff --git a/libs/kimath/include/math/box2.h b/libs/kimath/include/math/box2.h
+index e443d0cb3..79dea998c 100644
+--- a/libs/kimath/include/math/box2.h
++++ b/libs/kimath/include/math/box2.h
+@@ -557,67 +557,8 @@ public:
+      */
+     constexpr BOX2<Vec>& Inflate( coord_type dx, coord_type dy )
+     {
+-        if( m_Size.x >= 0 )
+-        {
+-            if( m_Size.x < -2 * dx )
+-            {
+-                // Don't allow deflate to eat more width than we have,
+-                m_Pos.x = KiCheckedCast<ecoord_type, coord_type>( ecoord_type( m_Pos.x ) + m_Size.x / 2 );
+-                m_Size.x = 0;
+-            }
+-            else
+-            {
+-                // The inflate is valid.
+-                m_Pos.x  -= dx;
+-                m_Size.x +=  2 * dx;
+-            }
+-        }
+-        else    // size.x < 0:
+-        {
+-            if( m_Size.x > 2 * dx )
+-            {
+-                // Don't allow deflate to eat more width than we have,
+-                m_Pos.x = KiCheckedCast<ecoord_type, coord_type>( ecoord_type( m_Pos.x ) - m_Size.x / 2 );
+-                m_Size.x = 0;
+-            }
+-            else
+-            {
+-                // The inflate is valid.
+-                m_Pos.x  += dx;
+-                m_Size.x -= 2 * dx; // m_Size.x <0: inflate when dx > 0
+-            }
+-        }
+-
+-        if( m_Size.y >= 0 )
+-        {
+-            if( m_Size.y < -2 * dy )
+-            {
+-                // Don't allow deflate to eat more height than we have,
+-                m_Pos.y = KiCheckedCast<ecoord_type, coord_type>( ecoord_type( m_Pos.y ) + m_Size.y / 2 );
+-                m_Size.y = 0;
+-            }
+-            else
+-            {
+-                // The inflate is valid.
+-                m_Pos.y  -= dy;
+-                m_Size.y += 2 * dy;
+-            }
+-        }
+-        else    // size.y < 0:
+-        {
+-            if( m_Size.y > 2 * dy )
+-            {
+-                // Don't allow deflate to eat more height than we have,
+-                m_Pos.y = KiCheckedCast<ecoord_type, coord_type>( ecoord_type( m_Pos.y ) - m_Size.y / 2 );
+-                m_Size.y = 0;
+-            }
+-            else
+-            {
+-                // The inflate is valid.
+-                m_Pos.y  += dy;
+-                m_Size.y -= 2 * dy; // m_Size.y <0: inflate when dy > 0
+-            }
+-        }
++        inflateAxis( m_Pos.x, m_Size.x, dx );
++        inflateAxis( m_Pos.y, m_Size.y, dy );
+ 
+         return *this;
+     }
+@@ -785,12 +726,14 @@ public:
+ 
+     constexpr ecoord_type SquaredDistance( const Vec& aP ) const
+     {
+-        ecoord_type x2 = m_Pos.x + m_Size.x;
+-        ecoord_type y2 = m_Pos.y + m_Size.y;
+-        ecoord_type xdiff = std::max( aP.x < m_Pos.x ? m_Pos.x - aP.x : m_Pos.x - x2,
+-                                      (ecoord_type) 0 );
+-        ecoord_type ydiff = std::max( aP.y < m_Pos.y ? m_Pos.y - aP.y : m_Pos.y - y2,
+-                                      (ecoord_type) 0 );
++        const ecoord_type x1 = std::min<ecoord_type>( m_Pos.x, ecoord_type( m_Pos.x ) + m_Size.x );
++        const ecoord_type x2 = std::max<ecoord_type>( m_Pos.x, ecoord_type( m_Pos.x ) + m_Size.x );
++        const ecoord_type y1 = std::min<ecoord_type>( m_Pos.y, ecoord_type( m_Pos.y ) + m_Size.y );
++        const ecoord_type y2 = std::max<ecoord_type>( m_Pos.y, ecoord_type( m_Pos.y ) + m_Size.y );
++
++        const ecoord_type xdiff = std::max<ecoord_type>( aP.x < x1 ? x1 - aP.x : ecoord_type( aP.x ) - x2, 0 );
++        const ecoord_type ydiff = std::max<ecoord_type>( aP.y < y1 ? y1 - aP.y : ecoord_type( aP.y ) - y2, 0 );
++
+         return xdiff * xdiff + ydiff * ydiff;
+     }
+ 
+@@ -912,6 +855,49 @@ public:
+     }
+ 
+ private:
++    // Widened so that sentinel deltas cannot wrap, results saturate outward to keep the original region covered
++    static constexpr void inflateAxis( coord_type& aPos, size_type& aSize, coord_type aDelta )
++    {
++        const ecoord_type pos = aPos;
++        const ecoord_type delta = aDelta;
++        const ecoord_type limit = coord_limits::max();
++
++        if( aSize >= 0 )
++        {
++            if( aSize < -2 * delta )
++            {
++                // Don't allow deflate to eat more width than we have,
++                aPos = KiCheckedCast<ecoord_type, coord_type>( pos + aSize / 2 );
++                aSize = 0;
++            }
++            else
++            {
++                const ecoord_type lo = std::clamp<ecoord_type>( pos - delta, -limit, limit );
++                const ecoord_type hi = std::clamp<ecoord_type>( pos + aSize + delta, -limit, limit );
++
++                aPos = static_cast<coord_type>( lo );
++                aSize = hi - lo;
++            }
++        }
++        else
++        {
++            if( aSize > 2 * delta )
++            {
++                aPos = KiCheckedCast<ecoord_type, coord_type>( pos - aSize / 2 );
++                aSize = 0;
++            }
++            else
++            {
++                // Negative size, pos is the high edge so inflating moves it up and the low edge down
++                const ecoord_type hi = std::clamp<ecoord_type>( pos + delta, -limit, limit );
++                const ecoord_type lo = std::clamp<ecoord_type>( pos + aSize - delta, -limit, limit );
++
++                aPos = static_cast<coord_type>( hi );
++                aSize = lo - hi;
++            }
++        }
++    }
++
+     Vec     m_Pos;  // Rectangle Origin
+     SizeVec m_Size; // Rectangle Size
+ 
+diff --git a/libs/kimath/src/geometry/shape.cpp b/libs/kimath/src/geometry/shape.cpp
+index 6e8b5a0a4..bce32158e 100644
+--- a/libs/kimath/src/geometry/shape.cpp
++++ b/libs/kimath/src/geometry/shape.cpp
+@@ -94,7 +94,7 @@ int SHAPE::GetClearance( const SHAPE* aOther ) const
+     {
+         for( const SHAPE* b : b_shapes )
+         {
+-            int temp_dist = 0;
++            int temp_dist = std::numeric_limits<int>::max();
+             a->Collide( b, std::numeric_limits<int>::max() / 2, &temp_dist );
+ 
+             if( temp_dist < actual_clearance )
+diff --git a/qa/tests/libs/kimath/math/test_box2.cpp b/qa/tests/libs/kimath/math/test_box2.cpp
+index d2d4cce6a..526557a04 100644
+--- a/qa/tests/libs/kimath/math/test_box2.cpp
++++ b/qa/tests/libs/kimath/math/test_box2.cpp
+@@ -215,4 +215,62 @@ BOOST_AUTO_TEST_CASE( test_intersects_circle_edge, *boost::unit_test::tolerance(
+     BOOST_TEST( box.IntersectsCircleEdge( VECTOR2D( 14, 6 ), 5, 1 ) == false );
+ }
+ 
++// Reference distance from a point to a box by clamping per axis
++static int64_t refSquaredDistance( const BOX2I& aBox, const VECTOR2I& aP )
++{
++    const int64_t x1 = std::min<int64_t>( aBox.GetLeft(), aBox.GetRight() );
++    const int64_t x2 = std::max<int64_t>( aBox.GetLeft(), aBox.GetRight() );
++    const int64_t y1 = std::min<int64_t>( aBox.GetTop(), aBox.GetBottom() );
++    const int64_t y2 = std::max<int64_t>( aBox.GetTop(), aBox.GetBottom() );
++    const int64_t dx = aP.x < x1 ? x1 - aP.x : ( aP.x > x2 ? aP.x - x2 : 0 );
++    const int64_t dy = aP.y < y1 ? y1 - aP.y : ( aP.y > y2 ? aP.y - y2 : 0 );
++
++    return dx * dx + dy * dy;
++}
++
++BOOST_AUTO_TEST_CASE( SquaredDistanceToPoint )
++{
++    const BOX2I box( VECTOR2I( 0, 0 ), VECTOR2I( 100, 100 ) );
++
++    BOOST_CHECK_EQUAL( box.SquaredDistance( VECTOR2I( 1000, 50 ) ), 810000 );
++    BOOST_CHECK_EQUAL( box.SquaredDistance( VECTOR2I( -20, 50 ) ), 400 );
++    BOOST_CHECK_EQUAL( box.SquaredDistance( VECTOR2I( 50, 1000 ) ), 810000 );
++    BOOST_CHECK_EQUAL( box.SquaredDistance( VECTOR2I( 50, -30 ) ), 900 );
++    BOOST_CHECK_EQUAL( box.SquaredDistance( VECTOR2I( 50, 50 ) ), 0 );
++
++    const int coords[] = { -300, -100, -1, 0, 1, 50, 99, 100, 101, 250, 1000 };
++
++    for( const BOX2I& b : { box, BOX2I( VECTOR2I( 10, -40 ), VECTOR2I( 60, 25 ) ),
++                            BOX2I( VECTOR2I( 100, 100 ), VECTOR2L( -100, -100 ) ) } )
++    {
++        for( int x : coords )
++        {
++            for( int y : coords )
++                BOOST_CHECK_EQUAL( b.SquaredDistance( VECTOR2I( x, y ) ), refSquaredDistance( b, VECTOR2I( x, y ) ) );
++        }
++    }
++}
++
++BOOST_AUTO_TEST_CASE( InflateSentinelDoesNotWrap )
++{
++    const int delta = std::numeric_limits<int>::max() / 2 + 50000;
++
++    BOX2I box( VECTOR2I( 1000, 2000 ), VECTOR2I( 300, 400 ) );
++    box.Inflate( delta );
++
++    BOOST_CHECK_EQUAL( box.GetLeft(), 1000 - delta );
++    BOOST_CHECK_EQUAL( box.GetTop(), 2000 - delta );
++    BOOST_CHECK_EQUAL( box.GetWidth(), 300 + 2 * int64_t( delta ) );
++    BOOST_CHECK_EQUAL( box.GetHeight(), 400 + 2 * int64_t( delta ) );
++
++    // Far enough to saturate the coordinate range, the box must still cover the original
++    BOX2I huge( VECTOR2I( -1000, 500 ), VECTOR2I( 2000, 100 ) );
++    huge.Inflate( std::numeric_limits<int>::max() );
++
++    BOOST_CHECK_LE( huge.GetLeft(), -1000 );
++    BOOST_CHECK_LE( huge.GetTop(), 500 );
++    BOOST_CHECK_GE( int64_t( huge.GetLeft() ) + huge.GetWidth(), 1000 );
++    BOOST_CHECK_GE( int64_t( huge.GetTop() ) + huge.GetHeight(), 600 );
++}
++
+ BOOST_AUTO_TEST_SUITE_END()
+-- 
+2.43.0
+
