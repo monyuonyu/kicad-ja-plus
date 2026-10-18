@@ -1,0 +1,201 @@
+From f309292f342af8300d5baba0e797e2d902576fa2 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Sun, 18 Oct 2026 16:05:17 +0900
+Subject: [PATCH 55/59] kimath geometry: far-apart points without int overflow
+
+SEG::LineProject(), SHAPE_LINE_CHAIN_BASE::PointInside(),
+SHAPE_ARC::NearestPoints( arc ) and sliceContainsPoint(), SHAPE_CIRCLE::BBox()
+and SHAPE_POLY_SET::isExteriorWaist() subtracted or added two coordinates in
+int (and NearestPoints squared the distance of two arc centres in int64).
+Points more than INT_MAX apart, such as the centres of nearly straight arcs,
+overflowed (UBSan in vector2d.h:444/475, shape_line_chain.cpp:2026 and
+vector2d.h:573 from drc, drc-fill and the qa_pcbnew Creepage* tests).
+Widen to 64 bits, or to double where a product would not fit; the int path
+is kept unchanged for everything that fits.
+
+Found by tools/bughunt (kicad-ja-plus, run 39090891417).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ libs/kimath/include/geometry/shape_circle.h   | 12 ++++++++--
+ libs/kimath/src/geometry/circle.cpp           | 14 +++++++++--
+ libs/kimath/src/geometry/seg.cpp              | 19 +++++++++++++++
+ libs/kimath/src/geometry/shape_arc.cpp        | 10 ++++----
+ libs/kimath/src/geometry/shape_line_chain.cpp | 24 +++++++++++++++----
+ libs/kimath/src/geometry/shape_poly_set.cpp   |  2 +-
+ 6 files changed, 68 insertions(+), 13 deletions(-)
+
+diff --git a/libs/kimath/include/geometry/shape_circle.h b/libs/kimath/include/geometry/shape_circle.h
+index f3a678df2..aae91f196 100644
+--- a/libs/kimath/include/geometry/shape_circle.h
++++ b/libs/kimath/include/geometry/shape_circle.h
+@@ -69,9 +69,17 @@ public:
+ 
+     const BOX2I BBox( int aClearance = 0 ) const override
+     {
+-        const VECTOR2I rc( m_circle.Radius + aClearance, m_circle.Radius + aClearance );
++        // In 64 bits: a circle near the edge of the coordinate range must not wrap around
++        const int64_t r = int64_t( m_circle.Radius ) + aClearance;
++        const auto    clampI = []( int64_t v )
++                {
++                    return int( std::clamp<int64_t>( v, std::numeric_limits<int>::lowest(),
++                                                     std::numeric_limits<int>::max() ) );
++                };
++        const VECTOR2I lo( clampI( m_circle.Center.x - r ), clampI( m_circle.Center.y - r ) );
++        const VECTOR2I hi( clampI( m_circle.Center.x + r ), clampI( m_circle.Center.y + r ) );
+ 
+-        return BOX2I( m_circle.Center - rc, rc * 2 );
++        return BOX2I( lo, VECTOR2L( int64_t( hi.x ) - lo.x, int64_t( hi.y ) - lo.y ) );
+     }
+ 
+     bool Collide( const SEG& aSeg, int aClearance = 0, int* aActual = nullptr,
+diff --git a/libs/kimath/src/geometry/circle.cpp b/libs/kimath/src/geometry/circle.cpp
+index dd0de24ad..9699b4584 100644
+--- a/libs/kimath/src/geometry/circle.cpp
++++ b/libs/kimath/src/geometry/circle.cpp
+@@ -367,8 +367,18 @@ std::vector<VECTOR2I> CIRCLE::IntersectLine( const SEG& aLine ) const
+     VECTOR2I mTo1vec = ( aLine.B - aLine.A ).Resize( mTo1dist );
+     VECTOR2I mTo2vec = -mTo1vec;
+ 
+-    retval.push_back( mTo1vec + m );
+-    retval.push_back( mTo2vec + m );
++    // In 64 bits: m can be near the edge of the coordinate range (a far-away centre)
++    auto add = []( const VECTOR2I& a, const VECTOR2I& b )
++            {
++                constexpr int64_t lo = std::numeric_limits<int>::lowest();
++                constexpr int64_t hi = std::numeric_limits<int>::max();
++
++                return VECTOR2I( int( std::clamp<int64_t>( int64_t( a.x ) + b.x, lo, hi ) ),
++                                 int( std::clamp<int64_t>( int64_t( a.y ) + b.y, lo, hi ) ) );
++            };
++
++    retval.push_back( add( mTo1vec, m ) );
++    retval.push_back( add( mTo2vec, m ) );
+ 
+     return retval;
+ }
+diff --git a/libs/kimath/src/geometry/seg.cpp b/libs/kimath/src/geometry/seg.cpp
+index 18e8ab5cd..0701f0a20 100644
+--- a/libs/kimath/src/geometry/seg.cpp
++++ b/libs/kimath/src/geometry/seg.cpp
+@@ -684,6 +684,25 @@ const VECTOR2I SEG::ReflectPoint( const VECTOR2I& aP ) const
+ 
+ VECTOR2I SEG::LineProject( const VECTOR2I& aP ) const
+ {
++    const int64_t dx = int64_t( B.x ) - A.x;
++    const int64_t dy = int64_t( B.y ) - A.y;
++    const int64_t px = int64_t( aP.x ) - A.x;
++    const int64_t py = int64_t( aP.y ) - A.y;
++
++    auto fitsInt = []( int64_t v )
++            {
++                return v >= std::numeric_limits<int>::lowest() && v <= std::numeric_limits<int>::max();
++            };
++
++    // Points more than INT_MAX apart: B - A or aP - A would overflow, so project in double
++    if( !fitsInt( dx ) || !fitsInt( dy ) || !fitsInt( px ) || !fitsInt( py ) )
++    {
++        const VECTOR2D dd{ double( dx ), double( dy ) };
++        const double   t = dd.Dot( VECTOR2D( double( px ), double( py ) ) ) / dd.Dot( dd );
++
++        return VECTOR2I( KiROUND( A.x + dd.x * t, true ), KiROUND( A.y + dd.y * t, true ) );
++    }
++
+     VECTOR2I d = B - A;
+     ecoord   l_squared = d.Dot( d );
+ 
+diff --git a/libs/kimath/src/geometry/shape_arc.cpp b/libs/kimath/src/geometry/shape_arc.cpp
+index 0a4f2c92a..0f6283b0a 100644
+--- a/libs/kimath/src/geometry/shape_arc.cpp
++++ b/libs/kimath/src/geometry/shape_arc.cpp
+@@ -261,7 +261,7 @@ bool SHAPE_ARC::IsEffectiveLine() const
+ bool SHAPE_ARC::Collide( const SEG& aSeg, int aClearance, int* aActual, VECTOR2I* aLocation ) const
+ {
+     VECTOR2I center = GetCenter();
+-    double   radius = VECTOR2D( center - m_start ).EuclideanNorm();
++    double   radius = ( VECTOR2D( center ) - VECTOR2D( m_start ) ).EuclideanNorm();
+ 
+     // CIRCLE and SHAPE_CIRCLE store radius as int.  When the radius exceeds representable
+     // range, fall back to segment-based candidate generation to avoid integer overflow.
+@@ -676,9 +676,11 @@ bool SHAPE_ARC::NearestPoints( const SHAPE_ARC& aArc, VECTOR2I& aPtA, VECTOR2I&
+     VECTOR2I center2 = aArc.GetCenter();
+ 
+     // Centers aren't exact, so center_dist_sq won't be exact either
+-    int64_t center_dist_sq = center1.SquaredDistance( center2 );
++    // In double: the centres of nearly straight arcs can be so far apart that the squared
++    // distance does not fit in 64 bits
++    double  center_dist_sq = ( VECTOR2D( center1 ) - VECTOR2D( center2 ) ).SquaredEuclideanNorm();
+     int64_t center_epsilon = KiROUND( std::min( m_radius, aArc.GetRadius() ) / 1000 );
+-    bool    colocated = center_dist_sq < center_epsilon * center_epsilon;
++    bool    colocated = center_dist_sq < double( center_epsilon ) * double( center_epsilon );
+ 
+     // Start by checking endpoints
+     std::vector<VECTOR2I> pts1 = { m_start, m_end };
+@@ -1135,7 +1137,7 @@ bool SHAPE_ARC::sliceContainsPoint( const VECTOR2I& p ) const
+     EDA_ANGLE ca = GetCentralAngle();
+     EDA_ANGLE ea = sa + ca;
+ 
+-    EDA_ANGLE phi( p - GetCenter() ); // Angle from center to the point
++    EDA_ANGLE phi( VECTOR2D( p ) - VECTOR2D( GetCenter() ) ); // Angle from center to the point
+     phi.Normalize();
+ 
+     if( ca >= ANGLE_0 )
+diff --git a/libs/kimath/src/geometry/shape_line_chain.cpp b/libs/kimath/src/geometry/shape_line_chain.cpp
+index 96d3b5c95..ca691d691 100644
+--- a/libs/kimath/src/geometry/shape_line_chain.cpp
++++ b/libs/kimath/src/geometry/shape_line_chain.cpp
+@@ -2014,18 +2014,34 @@ bool SHAPE_LINE_CHAIN_BASE::PointInside( const VECTOR2I& aPt, int aAccuracy,
+     int  pointCount = GetPointCount();
+     bool inside = false;
+ 
++    auto fitsInt = []( int64_t v )
++            {
++                return v >= std::numeric_limits<int>::lowest() && v <= std::numeric_limits<int>::max();
++            };
++
+     for( int i = 0; i < pointCount; )
+     {
+         const VECTOR2I p1 = GetPoint( i++ );
+         const VECTOR2I p2 = GetPoint( i == pointCount ? 0 : i );
+-        const VECTOR2I diff = p2 - p1;
++        // In 64 bits: the points can be more than INT_MAX apart
++        const int64_t dx = int64_t( p2.x ) - p1.x;
++        const int64_t dy = int64_t( p2.y ) - p1.y;
+ 
+-        if( diff.y == 0 )
++        if( dy == 0 )
+             continue;
+ 
+-        const int d = rescale( diff.x, ( aPt.y - p1.y ), diff.y );
++        if( ( p1.y >= aPt.y ) == ( p2.y >= aPt.y ) )
++            continue;
++
++        const int64_t py = int64_t( aPt.y ) - p1.y;
++        int64_t       d;
++
++        if( fitsInt( dx ) && fitsInt( dy ) && fitsInt( py ) )
++            d = rescale( int( dx ), int( py ), int( dy ) );
++        else
++            d = rescale<int64_t>( dx, py, dy );
+ 
+-        if( ( ( p1.y >= aPt.y ) != ( p2.y >= aPt.y ) ) && ( aPt.x - p1.x < d ) )
++        if( int64_t( aPt.x ) - p1.x < d )
+             inside = !inside;
+     }
+ 
+diff --git a/libs/kimath/src/geometry/shape_poly_set.cpp b/libs/kimath/src/geometry/shape_poly_set.cpp
+index e837d8b2d..1daf48d04 100644
+--- a/libs/kimath/src/geometry/shape_poly_set.cpp
++++ b/libs/kimath/src/geometry/shape_poly_set.cpp
+@@ -1884,7 +1884,7 @@ bool SHAPE_POLY_SET::isExteriorWaist( const SEG& aSegA, const SEG& aSegB ) const
+ 
+     // Check if there is polygon material on either side of the overlapping segments
+     // Get the midpoint between s and e for testing
+-    VECTOR2I midpoint = ( s + e ) / 2;
++    VECTOR2I midpoint( ( int64_t( s.x ) + e.x ) / 2, ( int64_t( s.y ) + e.y ) / 2 ); // no int overflow
+ 
+     // Create perpendicular offset vector to check both sides
+     VECTOR2I segDir = e - s;
+-- 
+2.43.0
+
