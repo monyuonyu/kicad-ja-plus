@@ -1,0 +1,86 @@
+From 40ce3469a98a59275e448bf1e4647305db5bbc3b Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Sun, 18 Oct 2026 15:20:54 +0900
+Subject: [PATCH 52/59] RotatePoint about a centre: work in 64 bits and clamp
+
+RotatePoint( int*, int*, cx, cy, angle ) subtracted the centre and added it
+back in int. A point and a centre near opposite ends of the coordinate range
+(arcs of huge radius, rotated boxes of huge text) overflowed (UBSan in
+trigo.cpp:271-277 from gerbers/drill/pos/ipc2581/odb/fp-svg/fp-upgrade).
+Compute the offset and the rotated offset in int64_t and clamp the result to
+int. For anything that fits the result is the same as before.
+
+Found by tools/bughunt (kicad-ja-plus, run 39090891417).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ libs/kimath/src/trigo.cpp | 49 +++++++++++++++++++++++++++++++++------
+ 1 file changed, 42 insertions(+), 7 deletions(-)
+
+diff --git a/libs/kimath/src/trigo.cpp b/libs/kimath/src/trigo.cpp
+index b63e304f9..f639ac3e6 100644
+--- a/libs/kimath/src/trigo.cpp
++++ b/libs/kimath/src/trigo.cpp
+@@ -264,17 +264,52 @@ void RotatePoint( int* pX, int* pY, const EDA_ANGLE& aAngle )
+ }
+ 
+ 
+-void RotatePoint( int* pX, int* pY, int cx, int cy, const EDA_ANGLE& angle )
++void RotatePoint( int* pX, int* pY, int cx, int cy, const EDA_ANGLE& aAngle )
+ {
+-    int ox, oy;
++    // A point and a centre at opposite ends of the coordinate range are more than INT_MAX
++    // apart, and so can be the rotated point: work in 64 bits and clamp the result.
++    // For anything that fits, the result is the same as rotating in int.
++    int64_t   ox = int64_t( *pX ) - cx;
++    int64_t   oy = int64_t( *pY ) - cy;
++    int64_t   rx, ry;
++    EDA_ANGLE angle = aAngle;
+ 
+-    ox = *pX - cx;
+-    oy = *pY - cy;
++    angle.Normalize();
+ 
+-    RotatePoint( &ox, &oy, angle );
++    if( angle == ANGLE_0 )
++    {
++        rx = ox;
++        ry = oy;
++    }
++    else if( angle == ANGLE_90 )
++    {
++        rx = oy;
++        ry = -ox;
++    }
++    else if( angle == ANGLE_180 )
++    {
++        rx = -ox;
++        ry = -oy;
++    }
++    else if( angle == ANGLE_270 )
++    {
++        rx = -oy;
++        ry = ox;
++    }
++    else
++    {
++        double sinus = angle.Sin();
++        double cosinus = angle.Cos();
+ 
+-    *pX = ox + cx;
+-    *pY = oy + cy;
++        rx = std::llround( ( double( oy ) * sinus ) + ( double( ox ) * cosinus ) );
++        ry = std::llround( ( double( oy ) * cosinus ) - ( double( ox ) * sinus ) );
++    }
++
++    constexpr int64_t lo = std::numeric_limits<int>::lowest();
++    constexpr int64_t hi = std::numeric_limits<int>::max();
++
++    *pX = int( std::clamp<int64_t>( rx + cx, lo, hi ) );
++    *pY = int( std::clamp<int64_t>( ry + cy, lo, hi ) );
+ }
+ 
+ 
+-- 
+2.43.0
+
