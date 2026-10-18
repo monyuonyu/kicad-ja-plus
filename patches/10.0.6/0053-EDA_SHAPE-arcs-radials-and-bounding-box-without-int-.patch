@@ -1,0 +1,107 @@
+From e14d9e1f320a3116e177c3241a70cb8a44434e0c Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Sun, 18 Oct 2026 15:20:54 +0900
+Subject: [PATCH 53/59] EDA_SHAPE arcs: radials and bounding box without int
+ overflow
+
+CalcArcAngles() and SetArcGeometry() took start/mid/end minus the centre in
+int before converting to double, and computeArcBBox() added the radius to the
+centre in int. The centre of a nearly straight arc can be far outside the
+board (UBSan in vector2d.h:475 via CalcArcAngles/SetArcGeometry and in
+eda_shape.cpp computeArcBBox, from gerbers/drill/pos/ipcd356/ipc2581/odb/
+fp-svg/gencad). Subtract in double, and clamp the extreme points to int.
+Results for anything that fits are unchanged.
+
+Found by tools/bughunt (kicad-ja-plus, run 39090891417).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ common/eda_shape.cpp | 35 +++++++++++++++++++++++------------
+ 1 file changed, 23 insertions(+), 12 deletions(-)
+
+diff --git a/common/eda_shape.cpp b/common/eda_shape.cpp
+index d18661c89..bd09383e9 100644
+--- a/common/eda_shape.cpp
++++ b/common/eda_shape.cpp
+@@ -1131,8 +1131,9 @@ VECTOR2I EDA_SHAPE::GetArcMid() const
+ 
+ void EDA_SHAPE::CalcArcAngles( EDA_ANGLE& aStartAngle, EDA_ANGLE& aEndAngle ) const
+ {
+-    VECTOR2D startRadial( GetStart() - getCenter() );
+-    VECTOR2D endRadial( GetEnd() - getCenter() );
++    // Subtract in double: the centre of a nearly straight arc can be further than INT_MAX away
++    VECTOR2D startRadial( VECTOR2D( GetStart() ) - VECTOR2D( getCenter() ) );
++    VECTOR2D endRadial( VECTOR2D( GetEnd() ) - VECTOR2D( getCenter() ) );
+ 
+     aStartAngle = EDA_ANGLE( startRadial );
+     aEndAngle = EDA_ANGLE( endRadial );
+@@ -1200,8 +1201,8 @@ void EDA_SHAPE::SetArcGeometry( const VECTOR2I& aStart, const VECTOR2I& aMid, co
+      * up on the other side of the arc.  In this case, we need to flip the start/end points and
+      * flag this change for the system.
+      */
+-    VECTOR2D dist( new_mid - aMid );
+-    VECTOR2D dist2( new_mid - m_arcCenter );
++    VECTOR2D dist( VECTOR2D( new_mid ) - VECTOR2D( aMid ) );
++    VECTOR2D dist2( VECTOR2D( new_mid ) - VECTOR2D( m_arcCenter ) );
+ 
+     if( dist.SquaredEuclideanNorm() > dist2.SquaredEuclideanNorm() )
+     {
+@@ -1910,6 +1911,16 @@ void EDA_SHAPE::computeArcBBox( BOX2I& aBBox ) const
+         aBBox.Merge( m_arcCenter );
+ 
+     int       radius = GetRadius();
++
++    // The extreme points of an arc whose centre is near the edge of the coordinate range can
++    // be outside it: clamp them instead of overflowing
++    auto at = [&]( int64_t aX, int64_t aY )
++            {
++                constexpr int64_t lo = std::numeric_limits<int>::lowest();
++                constexpr int64_t hi = std::numeric_limits<int>::max();
++
++                return VECTOR2I( int( std::clamp( aX, lo, hi ) ), int( std::clamp( aY, lo, hi ) ) );
++            };
+     EDA_ANGLE t1, t2;
+ 
+     CalcArcAngles( t1, t2 );
+@@ -1920,30 +1931,30 @@ void EDA_SHAPE::computeArcBBox( BOX2I& aBBox ) const
+     if( t2 > t1 )
+     {
+         if( t1 < ANGLE_0 && t2 > ANGLE_0 )
+-            aBBox.Merge( VECTOR2I( m_arcCenter.x + radius, m_arcCenter.y ) ); // right
++            aBBox.Merge( at( int64_t( m_arcCenter.x ) + radius, m_arcCenter.y ) ); // right
+ 
+         if( t1 < ANGLE_90 && t2 > ANGLE_90 )
+-            aBBox.Merge( VECTOR2I( m_arcCenter.x, m_arcCenter.y + radius ) ); // down
++            aBBox.Merge( at( m_arcCenter.x, int64_t( m_arcCenter.y ) + radius ) ); // down
+ 
+         if( t1 < ANGLE_180 && t2 > ANGLE_180 )
+-            aBBox.Merge( VECTOR2I( m_arcCenter.x - radius, m_arcCenter.y ) ); // left
++            aBBox.Merge( at( int64_t( m_arcCenter.x ) - radius, m_arcCenter.y ) ); // left
+ 
+         if( t1 < ANGLE_270 && t2 > ANGLE_270 )
+-            aBBox.Merge( VECTOR2I( m_arcCenter.x, m_arcCenter.y - radius ) ); // up
++            aBBox.Merge( at( m_arcCenter.x, int64_t( m_arcCenter.y ) - radius ) ); // up
+     }
+     else
+     {
+         if( t1 < ANGLE_0 || t2 > ANGLE_0 )
+-            aBBox.Merge( VECTOR2I( m_arcCenter.x + radius, m_arcCenter.y ) ); // right
++            aBBox.Merge( at( int64_t( m_arcCenter.x ) + radius, m_arcCenter.y ) ); // right
+ 
+         if( t1 < ANGLE_90 || t2 > ANGLE_90 )
+-            aBBox.Merge( VECTOR2I( m_arcCenter.x, m_arcCenter.y + radius ) ); // down
++            aBBox.Merge( at( m_arcCenter.x, int64_t( m_arcCenter.y ) + radius ) ); // down
+ 
+         if( t1 < ANGLE_180 || t2 > ANGLE_180 )
+-            aBBox.Merge( VECTOR2I( m_arcCenter.x - radius, m_arcCenter.y ) ); // left
++            aBBox.Merge( at( int64_t( m_arcCenter.x ) - radius, m_arcCenter.y ) ); // left
+ 
+         if( t1 < ANGLE_270 || t2 > ANGLE_270 )
+-            aBBox.Merge( VECTOR2I( m_arcCenter.x, m_arcCenter.y - radius ) ); // up
++            aBBox.Merge( at( m_arcCenter.x, int64_t( m_arcCenter.y ) - radius ) ); // up
+     }
+ }
+ 
+-- 
+2.43.0
+

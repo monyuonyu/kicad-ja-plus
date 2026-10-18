@@ -40,6 +40,7 @@
 | 0050 | 座標の端に近い箱の Inflate で `-2 * dx` と位置の引き算が int であふれる（SVG の出力）。本家 master [6eaa6bba](https://gitlab.com/kicad/code/kicad/-/commit/6eaa6bba6c5c1a860f617b75fd81af154bac0bcc) を持ってきた（点との距離の誤りも一緒に直る） | KiCad 全体のバグ探しで見つけた（UBSan、box2.h、`fp export svg`） |
 | 0051 | 押しのけ配線で円弧を引きずるときの接線の端の長さを int の掛け算で出してあふれる。本家 master [698e51a5](https://gitlab.com/kicad/code/kicad/-/commit/698e51a5dcda8c0fdfb7ce0795a7af56f9d9fb4c) を持ってきた | KiCad 全体のバグ探しで見つけた（UBSan、qa_pcbnew PNSDragArcRejectsNear180） |
 | 0052 | 中心のまわりの回転（RotatePoint）で、中心との差と戻しの足し算が int であふれる（座標の両端にある点と中心）。64 ビットで計算して int に収める。収まる値では結果は前と同じ。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、trigo.cpp、ガーバー・ドリル・位置・IPC-2581・ODB++・SVG・`fp upgrade`） |
+| 0053 | 図形の円弧: 角度・中点の向き・外形の箱を出すところで、中心との差や半径の足し算が int であふれる（ほぼまっすぐな円弧は中心がとても遠い）。double で引き、箱の端は int に収める。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、eda_shape.cpp、ガーバーなど 9 種） |
 
 8.0.9 で取り込んだ残りのもの（ルーターの修正 18 件、`drc --refill-zones`、`pcb export stats`、`pcb render`）は 10.0.6 に元から入っている。
 
