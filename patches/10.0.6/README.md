@@ -56,10 +56,10 @@
 | 0066 | 文字: 座標の端に近い位置の文字で、カーソルの送り・行の位置の計算が int であふれる。64 ビットで計算して int に収める（丸めは同じ）。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、`fp export svg`） |
 | 0067 | プロットの対話用の層: 出力の原点が INT_MIN のとき、その符号反転があふれる。64 ビットで反転して収める。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、`fp export svg`） |
 
-バグ探し（回 39090891417）で見つけて、直していないもの:
+バグ探し（回 39090891417 から 39129160714 まで）で見つけて、直していないもの:
 
-- 時間切れ（どれも結果は正しく、重いだけ）: 大きな面付けの基板の DRC・DRC の塗り直し・STEP（ergosnm_plate_panel）、Eagle の大きな基板の DRC の塗り直し、旧形式の大きなシンボルのライブラリの `sym upgrade`（opendous.lib）、大きなペーストのガーバーの `gerber info`。
-- 座標の端（±2.1 m 近く）にある物どうしの整数のあふれのうち、文字の描画（stroke_font.cpp・font.cpp）、多角形の移動（SHAPE_LINE_CHAIN::Move）、2 乗の距離が 64 ビットに入らないもの（SEG::SquaredDistance）。どれも壊れた・あり得ない座標のファイルだけで起き、VECTOR2I の引き算そのものの意味は変えていない（全体で使われているので）。
+- 時間切れ（どれも結果は正しく、重いだけ）: 大きな面付けの基板の DRC・DRC の塗り直し・STEP（ergosnm_plate_panel）、Eagle の大きな基板の DRC の塗り直し・ODB++、旧形式の大きなシンボルのライブラリの `sym upgrade`（opendous.lib）、大きなペーストのガーバーの `gerber info`。
+- 単体試験 DRCUnconnectedItemsExclusionsSaveLoad: 一時のプロジェクトの保存（SaveProjectAs）がファイルを作らない。プロジェクトが読み取り専用で開かれている（鍵のファイル）ように見えるが、原因は突き止めていない。サニタイザとは関係ない。
 
 8.0.9 で取り込んだ残りのもの（ルーターの修正 18 件、`drc --refill-zones`、`pcb export stats`、`pcb render`）は 10.0.6 に元から入っている。
 
