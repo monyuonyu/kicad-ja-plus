@@ -1,0 +1,88 @@
+From df0b5fa74f7eba282133156f5a051b1066dca420 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Mon, 19 Oct 2026 02:41:55 +0900
+Subject: [PATCH 66/67] Fonts: text positions near the edge of the coordinate
+ range without int overflow
+
+STROKE_FONT::GetTextAsGlyphs() advanced the cursor in int, and
+FONT::getLinePositions() took line end minus start and position plus line
+offset in int. Text placed near the edge of the coordinate range overflowed
+(UBSan in stroke_font.cpp:277 and vector2d.h:444/475 via getLinePositions,
+fp export svg). Add in 64 bits and clamp to int; rounding is unchanged.
+
+Found by tools/bughunt (kicad-ja-plus, run 39129160714).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ common/font/font.cpp        | 13 +++++++++++--
+ common/font/stroke_font.cpp |  9 +++++++--
+ 2 files changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/common/font/font.cpp b/common/font/font.cpp
+index 8a7234508..abcf2edf7 100644
+--- a/common/font/font.cpp
++++ b/common/font/font.cpp
+@@ -178,6 +178,14 @@ bool FONT::IsStroke( const wxString& aFontName )
+ }
+ 
+ 
++// a + b in 64 bits, clamped to int: text placed near the edge of the coordinate range
++static int clampedSum( int64_t a, int64_t b )
++{
++    return int( std::clamp<int64_t>( a + b, std::numeric_limits<int>::lowest(),
++                                     std::numeric_limits<int>::max() ) );
++}
++
++
+ void FONT::getLinePositions( const wxString& aText, const VECTOR2I& aPosition,
+                              wxArrayString& aTextLines, std::vector<VECTOR2I>& aPositions,
+                              std::vector<VECTOR2I>& aExtents, const TEXT_ATTRIBUTES& aAttrs,
+@@ -195,7 +203,7 @@ void FONT::getLinePositions( const wxString& aText, const VECTOR2I& aPosition,
+         VECTOR2I pos( aPosition.x, aPosition.y + i * interline );
+         VECTOR2I end = boundingBoxSingleLine( nullptr, aTextLines[i], pos, aAttrs.m_Size,
+                                               aAttrs.m_Italic, aFontMetrics );
+-        VECTOR2I bBox( end - pos );
++        VECTOR2I bBox( clampedSum( end.x, -int64_t( pos.x ) ), clampedSum( end.y, -int64_t( pos.y ) ) );
+ 
+         aExtents.push_back( bBox );
+ 
+@@ -242,7 +250,8 @@ void FONT::getLinePositions( const wxString& aText, const VECTOR2I& aPosition,
+             break;
+         }
+ 
+-        aPositions.push_back( aPosition + lineOffset );
++        aPositions.push_back( VECTOR2I( clampedSum( aPosition.x, lineOffset.x ),
++                                        clampedSum( aPosition.y, lineOffset.y ) ) );
+     }
+ }
+ 
+diff --git a/common/font/stroke_font.cpp b/common/font/stroke_font.cpp
+index 8f64ccf14..f4de1d36b 100644
+--- a/common/font/stroke_font.cpp
++++ b/common/font/stroke_font.cpp
+@@ -248,7 +248,9 @@ VECTOR2I STROKE_FONT::GetTextAsGlyphs( BOX2I* aBBox, std::vector<std::unique_ptr
+         else if( c == ' ' )
+         {
+             // 'space' character - draw nothing, advance cursor position
+-            cursor.x += KiROUND( glyphSize.x * space_width );
++            cursor.x = int( std::clamp<int64_t>( int64_t( cursor.x ) + KiROUND<double, int64_t>( glyphSize.x * space_width ),
++                                                 std::numeric_limits<int>::lowest(),
++                                                 std::numeric_limits<int>::max() ) );
+         }
+         else
+         {
+@@ -274,7 +276,10 @@ VECTOR2I STROKE_FONT::GetTextAsGlyphs( BOX2I* aBBox, std::vector<std::unique_ptr
+ 
+             glyphExtents *= glyphSize;
+ 
+-            cursor.x += KiROUND( glyphExtents.x );
++            // Clamped: text placed near the edge of the coordinate range must not wrap around
++            cursor.x = int( std::clamp<int64_t>( int64_t( cursor.x ) + KiROUND<double, int64_t>( glyphExtents.x ),
++                                                 std::numeric_limits<int>::lowest(),
++                                                 std::numeric_limits<int>::max() ) );
+         }
+ 
+         ++char_count;
+-- 
+2.43.0
+

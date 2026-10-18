@@ -53,6 +53,7 @@
 | 0063 | 回路図のシートの道筋（SCH_SHEET_PATH::Path()）の後回しの記憶を、接続の計算の並列の処理が同時に作り直してメモリを壊す（ASan: heap-buffer-overflow）。本家 master [525fc9ef](https://gitlab.com/kicad/code/kicad/-/commit/525fc9ef9) を持ってきた | KiCad 全体のバグ探しで見つけた（qa_eeschema Issue22864AlignSheetPins、たまに起きる） |
 | 0064 | 図形の移動（BOX2・SHAPE_LINE_CHAIN・SHAPE_ARC の Move）: 座標の端に近い物をさらに外へ動かすと int であふれて反対側へ回り込む。64 ビットで足して int に収める。収まる値では同じ。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、旧形式 .mod の `fp export svg`） |
 | 0065 | 線分と点の 2 乗の距離（SEG::SquaredDistance）: 差が 2^31 以上だと内積が 64 ビットに入らない。そのときは double で測り、64 ビットの最大で止める。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、DRC） |
+| 0066 | 文字: 座標の端に近い位置の文字で、カーソルの送り・行の位置の計算が int であふれる。64 ビットで計算して int に収める（丸めは同じ）。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、`fp export svg`） |
 
 バグ探し（回 39090891417）で見つけて、直していないもの:
 
