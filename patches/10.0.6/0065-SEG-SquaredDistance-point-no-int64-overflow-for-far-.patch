@@ -1,0 +1,66 @@
+From 1f7a87db64c7b9228e11dca03a972a2e475fb61b Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Mon, 19 Oct 2026 02:41:55 +0900
+Subject: [PATCH 65/67] SEG::SquaredDistance( point ): no int64 overflow for
+ far-apart points
+
+The dot products of differences up to 2^32 do not fit in 64 bits (UBSan in
+vector2d.h:557 and :309 via SEG::SquaredDistance from SEG::Contains and
+SHAPE_LINE_CHAIN_BASE::EdgeContainingPoint, drc). When any difference is 2^31
+or more, measure in double and saturate at the int64 maximum. The int64 path
+is unchanged for everything else.
+
+Found by tools/bughunt (kicad-ja-plus, run 39129160714).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ libs/kimath/src/geometry/seg.cpp | 33 ++++++++++++++++++++++++++++++++
+ 1 file changed, 33 insertions(+)
+
+diff --git a/libs/kimath/src/geometry/seg.cpp b/libs/kimath/src/geometry/seg.cpp
+index 0701f0a20..1bb2e276a 100644
+--- a/libs/kimath/src/geometry/seg.cpp
++++ b/libs/kimath/src/geometry/seg.cpp
+@@ -734,6 +734,39 @@ SEG::ecoord SEG::SquaredDistance( const VECTOR2I& aP ) const
+ {
+     VECTOR2<ecoord> ab( ecoord( B.x ) - A.x, ecoord( B.y ) - A.y );
+     VECTOR2<ecoord> ap( ecoord( aP.x ) - A.x, ecoord( aP.y ) - A.y );
++    VECTOR2<ecoord> bpv( ecoord( aP.x ) - B.x, ecoord( aP.y ) - B.y );
++
++    // The products below fit in 64 bits only while every difference is under 2^31 in size.
++    // Points more than that apart (at opposite ends of the coordinate range) are measured in
++    // double, and the result saturates
++    constexpr ecoord lim = ecoord( 1 ) << 31;
++
++    auto small = [&]( const VECTOR2<ecoord>& v )
++            {
++                return v.x > -lim && v.x < lim && v.y > -lim && v.y < lim;
++            };
++
++    if( !small( ab ) || !small( ap ) || !small( bpv ) )
++    {
++        const VECTOR2D abd( double( ab.x ), double( ab.y ) );
++        const VECTOR2D apd( double( ap.x ), double( ap.y ) );
++        const VECTOR2D bpd( double( bpv.x ), double( bpv.y ) );
++        const double   ed = apd.Dot( abd );
++        const double   fd = abd.Dot( abd );
++        double         gd;
++
++        if( ed <= 0 )
++            gd = apd.Dot( apd );
++        else if( ed >= fd )
++            gd = bpd.Dot( bpd );
++        else
++            gd = std::max( apd.Dot( apd ) - ( ed * ed ) / fd, 0.0 );
++
++        if( gd >= double( std::numeric_limits<ecoord>::max() ) )
++            return std::numeric_limits<ecoord>::max();
++
++        return KiROUND<double, ecoord>( gd, true );
++    }
+ 
+     ecoord e = ap.Dot( ab );
+ 
+-- 
+2.43.0
+
