@@ -1,0 +1,74 @@
+From 692ac9c38d20c3cbfc50b4acd81cd1dd28f74952 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Sun, 18 Oct 2026 18:18:49 +0900
+Subject: [PATCH] Creepage: no tangent paths between overlapping circles (NaN
+ nodes at INT_MIN)
+
+BE_SHAPE_CIRCLE::Paths( BE_SHAPE_CIRCLE ) built the "crossed" tangent paths
+even when the two circles overlap, and the "straight" ones when one is inside
+the other; BE_SHAPE_POINT::Paths( BE_SHAPE_CIRCLE ) built tangents from a point
+inside the circle. The ratios are then over 1, sqrt() returns NaN, and the NaN
+tangent points were converted to int (undefined; in practice INT_MIN). Those
+graph nodes at INT_MIN made every later subtraction overflow (UBSan in
+vector2d.h, circle.cpp, seg.cpp and drc_creepage_utils.cpp from
+qa_pcbnew CreepageOverlappingCirclesIssue24885 / CreepageOverlappingCapsIssue24875
+and DRC of boards with overlapping round cutouts). Only build the tangents
+that exist. Still present on master.
+
+Found by tools/bughunt (kicad-ja-plus, run 39107230873).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ pcbnew/drc/drc_creepage_utils.cpp | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/pcbnew/drc/drc_creepage_utils.cpp b/pcbnew/drc/drc_creepage_utils.cpp
+index 31d60afe6..3bc644e3e 100644
+--- a/pcbnew/drc/drc_creepage_utils.cpp
++++ b/pcbnew/drc/drc_creepage_utils.cpp
+@@ -176,6 +176,11 @@ std::vector<PATH_CONNECTION> BE_SHAPE_POINT::Paths( const BE_SHAPE_CIRCLE& aS2,
+     if( weightSquared > aMaxSquaredWeight )
+         return result;
+ 
++    // A point inside the circle has no tangent: the square roots below would be NaN, and the
++    // NaN tangent point became a node at INT_MIN
++    if( weightSquared < 0 )
++        return result;
++
+     VECTOR2D direction1 = VECTOR2D( pointPos.x - circleCenter.x, pointPos.y - circleCenter.y );
+     direction1 = direction1.Resize( 1 );
+ 
+@@ -425,7 +430,10 @@ std::vector<PATH_CONNECTION> BE_SHAPE_CIRCLE::Paths( const BE_SHAPE_CIRCLE& aS2,
+     // "Crossed" paths
+     double weightSquared2 = weightSquared - Rsum * Rsum;
+ 
+-    if( weightSquared1 <= aMaxSquaredWeight )
++    // Tangents exist only when the circles are apart enough: "straight" ones unless one circle
++    // is inside the other, "crossed" ones only when they do not overlap. Otherwise the ratios
++    // below are over 1, the square roots are NaN and the NaN points became nodes at INT_MIN
++    if( weightSquared > 0 && weightSquared1 >= 0 && weightSquared1 <= aMaxSquaredWeight )
+     {
+         VECTOR2D direction1 = VECTOR2D( p2.x - p1.x, p2.y - p1.y );
+         direction1 = direction1.Resize( 1 );
+@@ -449,7 +457,7 @@ std::vector<PATH_CONNECTION> BE_SHAPE_CIRCLE::Paths( const BE_SHAPE_CIRCLE& aS2,
+ 
+         result.push_back( pc );
+     }
+-    if( weightSquared2 <= aMaxSquaredWeight )
++    if( weightSquared > 0 && weightSquared2 >= 0 && weightSquared2 <= aMaxSquaredWeight )
+     {
+         VECTOR2D direction1 = VECTOR2D( p2.x - p1.x, p2.y - p1.y );
+         direction1 = direction1.Resize( 1 );
+@@ -867,8 +875,7 @@ void BE_SHAPE_CIRCLE::ConnectChildren( std::shared_ptr<GRAPH_NODE>& a1, std::sha
+         }
+     }
+ 
+-    VECTOR2D distI( a1->m_pos - a2->m_pos );
+-    VECTOR2D distD( double( distI.x ), double( distI.y ) );
++    VECTOR2D distD( VECTOR2D( a1->m_pos ) - VECTOR2D( a2->m_pos ) );
+ 
+     double weight = m_radius * 2 * asin( distD.EuclideanNorm() / ( 2.0 * m_radius ) );
+ 
+-- 
+2.43.0
+
