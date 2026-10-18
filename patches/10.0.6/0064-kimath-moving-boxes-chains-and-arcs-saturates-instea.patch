@@ -1,0 +1,112 @@
+From 2225e711b98c008be36b14d0499f1809f3978366 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Mon, 19 Oct 2026 02:41:55 +0900
+Subject: [PATCH 64/67] kimath: moving boxes, chains and arcs saturates instead
+ of wrapping
+
+BOX2::Move(), SHAPE_LINE_CHAIN::Move() and SHAPE_ARC::Move() added the offset
+in int. Moving an item near the edge of the coordinate range further out
+overflowed and wrapped to the other side (UBSan in vector2d.h:333/334 via
+BOX2::Move from PlotInteractiveLayer and via SHAPE_LINE_CHAIN::Move from
+TransformRoundChamferedRectToPolygon, fp export svg of a legacy .mod library).
+Add in 64 bits and clamp to int. Nothing changes for results that fit.
+
+Found by tools/bughunt (kicad-ja-plus, run 39129160714).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ libs/kimath/include/geometry/shape_line_chain.h | 13 ++++++++++++-
+ libs/kimath/include/math/box2.h                 | 17 ++++++++++++++++-
+ libs/kimath/src/geometry/shape_arc.cpp          | 16 +++++++++++++---
+ 3 files changed, 41 insertions(+), 5 deletions(-)
+
+diff --git a/libs/kimath/include/geometry/shape_line_chain.h b/libs/kimath/include/geometry/shape_line_chain.h
+index b039f4ed1..8e6c574df 100644
+--- a/libs/kimath/include/geometry/shape_line_chain.h
++++ b/libs/kimath/include/geometry/shape_line_chain.h
+@@ -777,8 +777,19 @@ public:
+ 
+     void Move( const VECTOR2I& aVector ) override
+     {
++        // In 64 bits, clamped: points near the edge of the coordinate range moved further out
++        // must not wrap around to the other side
++        auto addClamped = []( int a, int b )
++                {
++                    return int( std::clamp<int64_t>( int64_t( a ) + b, std::numeric_limits<int>::lowest(),
++                                                     std::numeric_limits<int>::max() ) );
++                };
++
+         for( auto& pt : m_points )
+-            pt += aVector;
++        {
++            pt.x = addClamped( pt.x, aVector.x );
++            pt.y = addClamped( pt.y, aVector.y );
++        }
+ 
+         for( auto& arc : m_arcs )
+             arc.Move( aVector );
+diff --git a/libs/kimath/include/math/box2.h b/libs/kimath/include/math/box2.h
+index 79dea998c..9c8e1af02 100644
+--- a/libs/kimath/include/math/box2.h
++++ b/libs/kimath/include/math/box2.h
+@@ -28,6 +28,7 @@
+ #define __BOX2_H
+ 
+ #include <algorithm>
++#include <type_traits>
+ #include <limits>
+ #include <optional>
+ 
+@@ -137,7 +138,21 @@ public:
+      */
+     constexpr void Move( const Vec& aMoveVector )
+     {
+-        m_Pos += aMoveVector;
++        if constexpr( std::is_integral_v<coord_type> )
++        {
++            // In the extended type, clamped: a box near the edge of the coordinate range moved
++            // further out must not wrap around to the other side
++            m_Pos.x = static_cast<coord_type>( std::clamp<ecoord_type>( ecoord_type( m_Pos.x ) + aMoveVector.x,
++                                                                        coord_limits::lowest(),
++                                                                        coord_limits::max() ) );
++            m_Pos.y = static_cast<coord_type>( std::clamp<ecoord_type>( ecoord_type( m_Pos.y ) + aMoveVector.y,
++                                                                        coord_limits::lowest(),
++                                                                        coord_limits::max() ) );
++        }
++        else
++        {
++            m_Pos += aMoveVector;
++        }
+     }
+ 
+     /**
+diff --git a/libs/kimath/src/geometry/shape_arc.cpp b/libs/kimath/src/geometry/shape_arc.cpp
+index 0f6283b0a..822d6b426 100644
+--- a/libs/kimath/src/geometry/shape_arc.cpp
++++ b/libs/kimath/src/geometry/shape_arc.cpp
+@@ -1073,9 +1073,19 @@ const SHAPE_LINE_CHAIN SHAPE_ARC::ConvertToPolyline( int aMaxError, int* aActual
+ 
+ void SHAPE_ARC::Move( const VECTOR2I& aVector )
+ {
+-    m_start += aVector;
+-    m_end += aVector;
+-    m_mid += aVector;
++    // In 64 bits, clamped: an arc near the edge of the coordinate range must not wrap around
++    auto add = [&]( VECTOR2I& aPt )
++            {
++                constexpr int64_t lo = std::numeric_limits<int>::lowest();
++                constexpr int64_t hi = std::numeric_limits<int>::max();
++
++                aPt.x = int( std::clamp<int64_t>( int64_t( aPt.x ) + aVector.x, lo, hi ) );
++                aPt.y = int( std::clamp<int64_t>( int64_t( aPt.y ) + aVector.y, lo, hi ) );
++            };
++
++    add( m_start );
++    add( m_end );
++    add( m_mid );
+     update_values();
+ }
+ 
+-- 
+2.43.0
+
