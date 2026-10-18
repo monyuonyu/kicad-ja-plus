@@ -1,0 +1,94 @@
+From c6ca8847014c13056bc6d32eceb6b464a65a84c9 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Sun, 18 Oct 2026 15:22:25 +0900
+Subject: [PATCH 54/59] Creepage: angles and centre distances of far-apart
+ points in double
+
+BE_SHAPE_CIRCLE/BE_SHAPE_ARC::AngleBetweenStartAndEnd(), the circle-to-arc
+Paths() and ConnectChildren() subtracted two VECTOR2I in int before taking
+the angle or the length. Path end points and arc centres can be more than
+INT_MAX apart (UBSan in vector2d.h:475 via BE_SHAPE_CIRCLE::Paths and
+BE_SHAPE_CIRCLE::ConnectChildren from drc and qa_pcbnew Creepage* tests).
+Subtract in double; the centre distance stays rounded as before.
+
+Found by tools/bughunt (kicad-ja-plus, run 39090891417).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ pcbnew/drc/drc_creepage_utils.cpp | 14 ++++++++------
+ pcbnew/drc/drc_creepage_utils.h   |  6 ++++--
+ 2 files changed, 12 insertions(+), 8 deletions(-)
+
+diff --git a/pcbnew/drc/drc_creepage_utils.cpp b/pcbnew/drc/drc_creepage_utils.cpp
+index b15a2c07c..31d60afe6 100644
+--- a/pcbnew/drc/drc_creepage_utils.cpp
++++ b/pcbnew/drc/drc_creepage_utils.cpp
+@@ -318,7 +318,8 @@ std::vector<PATH_CONNECTION> BE_SHAPE_CIRCLE::Paths( const BE_SHAPE_ARC& aS2, do
+     EDA_ANGLE                    arcStartAngle = aS2.GetStartAngle();
+     EDA_ANGLE                    arcEndAngle = aS2.GetEndAngle();
+ 
+-    double centerDistance = ( circleCenter - arcCenter ).EuclideanNorm();
++    // In double: the centres can be more than INT_MAX apart. Rounded like VECTOR2I::EuclideanNorm()
++    double centerDistance = std::round( ( VECTOR2D( circleCenter ) - VECTOR2D( arcCenter ) ).EuclideanNorm() );
+ 
+     if( centerDistance + arcRadius < circleRadius )
+     {
+@@ -366,7 +367,8 @@ std::vector<PATH_CONNECTION> BE_SHAPE_ARC::Paths( const BE_SHAPE_ARC& aS2, doubl
+     VECTOR2I                     arcCenter = aS2.GetPos();
+     double                       arcRadius = aS2.GetRadius();
+ 
+-    double centerDistance = ( circleCenter - arcCenter ).EuclideanNorm();
++    // In double: the centres can be more than INT_MAX apart. Rounded like VECTOR2I::EuclideanNorm()
++    double centerDistance = std::round( ( VECTOR2D( circleCenter ) - VECTOR2D( arcCenter ) ).EuclideanNorm() );
+ 
+     if( centerDistance + arcRadius < circleRadius )
+     {
+@@ -790,8 +792,8 @@ void BE_SHAPE_POINT::ConnectChildren( std::shared_ptr<GRAPH_NODE>& a1, std::shar
+ void BE_SHAPE_CIRCLE::ShortenChildDueToGV( std::shared_ptr<GRAPH_NODE>& a1, std::shared_ptr<GRAPH_NODE>& a2,
+                                            CREEPAGE_GRAPH& aG, double aNormalWeight ) const
+ {
+-    EDA_ANGLE angle1 = EDA_ANGLE( a1->m_pos - m_pos );
+-    EDA_ANGLE angle2 = EDA_ANGLE( a2->m_pos - m_pos );
++    EDA_ANGLE angle1 = EDA_ANGLE( VECTOR2D( a1->m_pos ) - VECTOR2D( m_pos ) );
++    EDA_ANGLE angle2 = EDA_ANGLE( VECTOR2D( a2->m_pos ) - VECTOR2D( m_pos ) );
+ 
+     while( angle1 < ANGLE_0 )
+         angle1 += ANGLE_360;
+@@ -846,8 +848,8 @@ void BE_SHAPE_CIRCLE::ConnectChildren( std::shared_ptr<GRAPH_NODE>& a1, std::sha
+     if( aG.m_hasOverlappingCutouts && aG.m_boardOutline )
+     {
+         int    tol = aG.m_board.GetDesignSettings().m_MaxError + 1000;
+-        double a1r = EDA_ANGLE( a1->m_pos - m_pos ).AsRadians();
+-        double a2r = EDA_ANGLE( a2->m_pos - m_pos ).AsRadians();
++        double a1r = EDA_ANGLE( VECTOR2D( a1->m_pos ) - VECTOR2D( m_pos ) ).AsRadians();
++        double a2r = EDA_ANGLE( VECTOR2D( a2->m_pos ) - VECTOR2D( m_pos ) ).AsRadians();
+         double delta = a2r - a1r;
+ 
+         while( delta > M_PI )
+diff --git a/pcbnew/drc/drc_creepage_utils.h b/pcbnew/drc/drc_creepage_utils.h
+index 4ad175786..1fcdb0e53 100644
+--- a/pcbnew/drc/drc_creepage_utils.h
++++ b/pcbnew/drc/drc_creepage_utils.h
+@@ -487,7 +487,8 @@ public:
+ 
+     EDA_ANGLE AngleBetweenStartAndEnd( const VECTOR2I aPoint ) const
+     {
+-        EDA_ANGLE angle( aPoint - m_pos );
++        // Subtract in double: a far-away point can be more than INT_MAX from the centre
++        EDA_ANGLE angle( VECTOR2D( aPoint ) - VECTOR2D( m_pos ) );
+ 
+         while( angle < GetStartAngle() )
+             angle += ANGLE_360;
+@@ -733,7 +734,8 @@ public:
+     VECTOR2I  GetEndPoint() const override { return m_endPoint; }
+     EDA_ANGLE AngleBetweenStartAndEnd( const VECTOR2I aPoint ) const
+     {
+-        EDA_ANGLE angle( aPoint - m_pos );
++        // Subtract in double: a far-away point can be more than INT_MAX from the centre
++        EDA_ANGLE angle( VECTOR2D( aPoint ) - VECTOR2D( m_pos ) );
+ 
+         while( angle < m_startAngle )
+             angle += ANGLE_360;
+-- 
+2.43.0
+
