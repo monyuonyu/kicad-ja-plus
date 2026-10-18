@@ -15,6 +15,8 @@ from run import SAN_RE, KEEP_BYTES  # noqa: E402
 SKIP = {
     # 100 ms 以内に終わるかを測る試験。ASan の下では 2〜3 倍遅くなるので落ちる（実測 116 ms）
     "TextEvalParserIntegration/RealWorldPerformance": "ASan の下では時間の上限を超える",
+    # 50 ms 以内に終わるかを測る試験（ASan の下で実測 72 ms）
+    "SchReferenceListUnits/CachingEfficiency": "ASan の下では時間の上限を超える",
 }
 
 
