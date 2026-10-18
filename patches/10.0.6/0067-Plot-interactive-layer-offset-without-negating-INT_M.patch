@@ -1,0 +1,35 @@
+From 838278eb29b0a3d1d86ee9a5793ce02cb6d34084 Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Mon, 19 Oct 2026 02:41:55 +0900
+Subject: [PATCH 67/67] Plot: interactive layer offset without negating INT_MIN
+
+PlotInteractiveLayer() negated the plot offset, which is INT_MIN for a
+footprint whose box reaches the edge of the coordinate range (UBSan: negation
+of -2147483648 in vector2d.h:505, fp export svg). Negate in 64 bits and clamp.
+
+Found by tools/bughunt (kicad-ja-plus, run 39129160714).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ pcbnew/plot_board_layers.cpp | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/pcbnew/plot_board_layers.cpp b/pcbnew/plot_board_layers.cpp
+index 9a1f44040..4ce5e5763 100644
+--- a/pcbnew/plot_board_layers.cpp
++++ b/pcbnew/plot_board_layers.cpp
+@@ -196,7 +196,10 @@ void PlotInteractiveLayer( BOARD* aBoard, PLOTTER* aPlotter, const PCB_PLOT_PARA
+ #endif
+         // Draw items are plotted with a position offset. So we need to move
+         // our boxes (which are not plotted) by the same offset.
+-        VECTOR2I offset = -aPlotter->GetPlotOffsetUserUnits();
++        // In 64 bits, clamped: the offset can be INT_MIN, whose negation does not fit
++        const VECTOR2I plotOffset = aPlotter->GetPlotOffsetUserUnits();
++        VECTOR2I       offset( int( std::min<int64_t>( -int64_t( plotOffset.x ), std::numeric_limits<int>::max() ) ),
++                               int( std::min<int64_t>( -int64_t( plotOffset.y ), std::numeric_limits<int>::max() ) ) );
+ 
+         // Use a footprint bbox without texts to create the hyperlink area
+         BOX2I bbox = fp->GetBoundingBox( false );
+-- 
+2.43.0
+
