@@ -1,0 +1,87 @@
+From 8e9027d7edc1a872fc2d36ffd70cfc07b7583f3e Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Sun, 18 Oct 2026 16:05:18 +0900
+Subject: [PATCH 57/59] Eagle board import: polygon arcs without int overflow
+
+loadPolygon() and the second polygon loader took the arc end minus the centre
+and the centre minus the start in int, and added the centre to the rounded
+offsets in int. A nearly straight curve puts the centre far away (UBSan in
+pcb_io_eagle.cpp:1576-1585 from importing Eagle boards). Compute in double /
+64 bits and clamp; unchanged for anything that fits.
+
+Found by tools/bughunt (kicad-ja-plus, run 39090891417).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ pcbnew/pcb_io/eagle/pcb_io_eagle.cpp | 34 +++++++++++++++++++++-------
+ 1 file changed, 26 insertions(+), 8 deletions(-)
+
+diff --git a/pcbnew/pcb_io/eagle/pcb_io_eagle.cpp b/pcbnew/pcb_io/eagle/pcb_io_eagle.cpp
+index 63da04a5e..eec853d02 100644
+--- a/pcbnew/pcb_io/eagle/pcb_io_eagle.cpp
++++ b/pcbnew/pcb_io/eagle/pcb_io_eagle.cpp
+@@ -1573,8 +1573,11 @@ ZONE* PCB_IO_EAGLE::loadPolygon( wxXmlNode* aPolyNode )
+             VECTOR2I center = ConvertArcCenter( VECTOR2I( kicad_x( v1.x ), kicad_y( v1.y ) ),
+                                                 VECTOR2I( kicad_x( v2.x ), kicad_y( v2.y ) ), *v1.curve );
+             double angle = DEG2RAD( *v1.curve );
+-            double end_angle = atan2( kicad_y( v2.y ) - center.y, kicad_x( v2.x ) - center.x );
+-            double radius = sqrt( pow( center.x - kicad_x( v1.x ), 2 ) + pow( center.y - kicad_y( v1.y ), 2 ) );
++            // In double: the centre of a nearly straight arc can be more than INT_MAX away
++            double end_angle = atan2( double( kicad_y( v2.y ) ) - center.y,
++                                      double( kicad_x( v2.x ) ) - center.x );
++            double radius = sqrt( pow( double( center.x ) - kicad_x( v1.x ), 2 )
++                                  + pow( double( center.y ) - kicad_y( v1.y ), 2 ) );
+ 
+             int    segCount = GetArcToSegmentCount( KiROUND( radius ), ARC_HIGH_DEF,
+                                                     EDA_ANGLE( *v1.curve, DEGREES_T ) );
+@@ -1582,8 +1585,14 @@ ZONE* PCB_IO_EAGLE::loadPolygon( wxXmlNode* aPolyNode )
+ 
+             for( double a = end_angle + angle; fabs( a - end_angle ) > fabs( delta_angle ); a -= delta_angle )
+             {
+-                polygon.Append( KiROUND( radius * cos( a ) ) + center.x,
+-                                KiROUND( radius * sin( a ) ) + center.y );
++                auto clampI = []( int64_t v )
++                        {
++                            return int( std::clamp<int64_t>( v, std::numeric_limits<int>::lowest(),
++                                                             std::numeric_limits<int>::max() ) );
++                        };
++
++                polygon.Append( clampI( KiROUND<double, int64_t>( radius * cos( a ) ) + center.x ),
++                                clampI( KiROUND<double, int64_t>( radius * sin( a ) ) + center.y ) );
+             }
+         }
+     }
+@@ -2248,8 +2257,11 @@ void PCB_IO_EAGLE::packagePolygon( FOOTPRINT* aFootprint, wxXmlNode* aTree ) con
+                                                 VECTOR2I( kicad_x( v2.x ), kicad_y( v2.y ) ),
+                                                 *v1.curve );
+             double angle = DEG2RAD( *v1.curve );
+-            double end_angle = atan2( kicad_y( v2.y ) - center.y, kicad_x( v2.x ) - center.x );
+-            double radius = sqrt( pow( center.x - kicad_x( v1.x ), 2 ) + pow( center.y - kicad_y( v1.y ), 2 ) );
++            // In double: the centre of a nearly straight arc can be more than INT_MAX away
++            double end_angle = atan2( double( kicad_y( v2.y ) ) - center.y,
++                                      double( kicad_x( v2.x ) ) - center.x );
++            double radius = sqrt( pow( double( center.x ) - kicad_x( v1.x ), 2 )
++                                  + pow( double( center.y ) - kicad_y( v1.y ), 2 ) );
+ 
+             // Don't allow a zero-radius curve
+             if( KiROUND( radius ) == 0 )
+@@ -2261,8 +2273,14 @@ void PCB_IO_EAGLE::packagePolygon( FOOTPRINT* aFootprint, wxXmlNode* aTree ) con
+ 
+             for( double a = end_angle + angle; fabs( a - end_angle ) > fabs( delta ); a -= delta )
+             {
+-                pts.push_back( VECTOR2I( KiROUND( radius * cos( a ) ),
+-                                         KiROUND( radius * sin( a ) ) ) + center );
++                auto clampI = []( int64_t v )
++                        {
++                            return int( std::clamp<int64_t>( v, std::numeric_limits<int>::lowest(),
++                                                             std::numeric_limits<int>::max() ) );
++                        };
++
++                pts.push_back( VECTOR2I( clampI( KiROUND<double, int64_t>( radius * cos( a ) ) + center.x ),
++                                         clampI( KiROUND<double, int64_t>( radius * sin( a ) ) + center.y ) ) );
+             }
+         }
+     }
+-- 
+2.43.0
+

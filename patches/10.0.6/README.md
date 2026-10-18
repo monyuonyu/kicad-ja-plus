@@ -44,6 +44,7 @@
 | 0054 | 沿面距離の DRC: 遠く離れた 2 点の差を int で取ってから角度・距離にしていてあふれる。double で引く（中心どうしの距離の丸めは前と同じ）。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、DRC と qa_pcbnew の Creepage の試験） |
 | 0055 | kimath の図形: 線への投影・多角形の内外の判定・円弧どうしの最近点・円の箱・くびれの判定・円と線の交点で、INT_MAX より離れた点の差や和があふれる。64 ビット（積が入らない所は double）に。収まる値では前と同じ道を通る。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、DRC・ゾーンの塗りつぶし、qa_kimath でも 2 件） |
 | 0056 | プロッタ: 出力の原点から遠い物の座標を int で引いてから倍率を掛けていてあふれる。double で引く。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、`fp export svg`） |
+| 0057 | Eagle の基板の取り込み: 多角形の円弧の中心との差と、中心への足し戻しが int であふれる。double／64 ビットで計算して int に収める。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、Eagle の基板の取り込み） |
 
 8.0.9 で取り込んだ残りのもの（ルーターの修正 18 件、`drc --refill-zones`、`pcb export stats`、`pcb render`）は 10.0.6 に元から入っている。
 
