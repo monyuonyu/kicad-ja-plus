@@ -1,0 +1,43 @@
+From 47f08e49ee3031dd916f43960726807b327504f3 Mon Sep 17 00:00:00 2001
+From: Seth Hillbrand <seth@kipro-pcb.com>
+Date: Thu, 8 Oct 2026 05:57:14 -0700
+Subject: [PATCH 51/59] PNS dragger: scale an arc's tangent stub without int
+ overflow (backport of master 698e51a5)
+
+Upstream commit 698e51a5d by Seth Hillbrand. perp.x * toMid.x and
+perp.x * stubLen were int products (UBSan in pns_dragger.cpp:213 from
+qa_pcbnew PNSDragArcRejectsNear180).
+
+Found by tools/bughunt (kicad-ja-plus, run 39090891417).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ pcbnew/router/pns_dragger.cpp | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/pcbnew/router/pns_dragger.cpp b/pcbnew/router/pns_dragger.cpp
+index 8b7c48662..cfd835479 100644
+--- a/pcbnew/router/pns_dragger.cpp
++++ b/pcbnew/router/pns_dragger.cpp
+@@ -210,7 +210,7 @@ bool DRAGGER::startDragArc( const VECTOR2D& aP, ARC* aArc )
+             VECTOR2I perp( -radial.y, radial.x );
+             VECTOR2I toMid = mid - aEndpoint;
+ 
+-            if( perp.x * toMid.x + perp.y * toMid.y > 0 )
++            if( perp.Dot( toMid ) > 0 )
+                 perp = VECTOR2I( radial.y, -radial.x );
+ 
+             double mag = std::hypot( (double) perp.x, (double) perp.y );
+@@ -218,7 +218,8 @@ bool DRAGGER::startDragArc( const VECTOR2D& aP, ARC* aArc )
+             if( mag <= 0 )
+                 return VECTOR2I( stubLen, 0 );
+ 
+-            return VECTOR2I( KiROUND( perp.x * stubLen / mag ), KiROUND( perp.y * stubLen / mag ) );
++            // A unit vector first, since a coordinate times the stub length does not fit an int
++            return VECTOR2I( KiROUND( perp.x / mag * stubLen ), KiROUND( perp.y / mag * stubLen ) );
+         };
+ 
+         if( isolatedStart )
+-- 
+2.43.0
+

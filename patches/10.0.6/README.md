@@ -38,6 +38,7 @@
 | 0048 | Eagle の回路図の取り込み: 円弧の半径を int で 2 乗して、半径およそ 4.6 mm を超えるとあふれる。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、Eagle の .lbr のシンボル） |
 | 0049 | ゾーンの網目の線の中点を 64 ビットで（外形が約 1 m より遠くまであるとあふれる）。本家 master も同じ | KiCad 全体のバグ探しで見つけた（UBSan、29 基板） |
 | 0050 | 座標の端に近い箱の Inflate で `-2 * dx` と位置の引き算が int であふれる（SVG の出力）。本家 master [6eaa6bba](https://gitlab.com/kicad/code/kicad/-/commit/6eaa6bba6c5c1a860f617b75fd81af154bac0bcc) を持ってきた（点との距離の誤りも一緒に直る） | KiCad 全体のバグ探しで見つけた（UBSan、box2.h、`fp export svg`） |
+| 0051 | 押しのけ配線で円弧を引きずるときの接線の端の長さを int の掛け算で出してあふれる。本家 master [698e51a5](https://gitlab.com/kicad/code/kicad/-/commit/698e51a5dcda8c0fdfb7ce0795a7af56f9d9fb4c) を持ってきた | KiCad 全体のバグ探しで見つけた（UBSan、qa_pcbnew PNSDragArcRejectsNear180） |
 
 8.0.9 で取り込んだ残りのもの（ルーターの修正 18 件、`drc --refill-zones`、`pcb export stats`、`pcb render`）は 10.0.6 に元から入っている。
 
