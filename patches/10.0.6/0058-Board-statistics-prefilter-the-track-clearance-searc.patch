@@ -1,0 +1,99 @@
+From 490b37a1e4f19ddd5c1ec8a35a7101abc118640c Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Sun, 18 Oct 2026 16:05:18 +0900
+Subject: [PATCH 58/59] Board statistics: prefilter the track clearance search
+ by bounding box
+
+The minimum track-to-track clearance compared every pair of tracks with the
+full shape collision, and built the effective shape of the other track again
+for each pair. Since the overflow fix that makes every pair be measured, this
+took more than the 10 minute limit on large boards (pcb export stats). Build
+each shape and its box once, and skip pairs whose boxes are further apart than
+the smallest clearance found so far: the shapes cannot be closer than their
+boxes, so the result is the same.
+
+Found by tools/bughunt (kicad-ja-plus, run 39090891417).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ pcbnew/board_statistics_report.cpp | 44 +++++++++++++++++++++++++-----
+ 1 file changed, 37 insertions(+), 7 deletions(-)
+
+diff --git a/pcbnew/board_statistics_report.cpp b/pcbnew/board_statistics_report.cpp
+index ffb8e8560..a6e413bfa 100644
+--- a/pcbnew/board_statistics_report.cpp
++++ b/pcbnew/board_statistics_report.cpp
+@@ -185,6 +185,27 @@ void ComputeBoardStatistics( BOARD* aBoard, const BOARD_STATISTICS_OPTIONS& aOpt
+         updatePadCounts( footprint, aData );
+     }
+ 
++    // Effective shapes and their boxes once per track, not once per pair
++    struct TRACK_SHAPE
++    {
++        PCB_TRACK*             track;
++        std::shared_ptr<SHAPE> shape;
++        BOX2I                  bbox;
++    };
++
++    std::vector<TRACK_SHAPE> trackShapes;
++
++    for( PCB_TRACK* track : aBoard->Tracks() )
++    {
++        if( track->IsType( trackTypes ) )
++        {
++            std::shared_ptr<SHAPE> shape = track->GetEffectiveShape( track->GetLayer() );
++            trackShapes.push_back( { track, shape, shape->BBox() } );
++        }
++    }
++
++    size_t shapeIdx = 0;
++
+     for( PCB_TRACK* track : aBoard->Tracks() )
+     {
+         if( track->Type() == PCB_TRACE_T )
+@@ -193,26 +214,35 @@ void ComputeBoardStatistics( BOARD* aBoard, const BOARD_STATISTICS_OPTIONS& aOpt
+         if( !track->IsType( trackTypes ) )
+             continue;
+ 
+-        PCB_LAYER_ID layer = track->GetLayer();
+-        auto         trackShapeA = track->GetEffectiveShape( layer );
++        const TRACK_SHAPE& a = trackShapes[shapeIdx++];
++        PCB_LAYER_ID       layer = track->GetLayer();
+ 
+-        for( PCB_TRACK* otherTrack : aBoard->Tracks() )
++        for( const TRACK_SHAPE& b : trackShapes )
+         {
++            PCB_TRACK* otherTrack = b.track;
++
+             if( layer != otherTrack->GetLayer() )
+                 continue;
+ 
+             if( track->GetNetCode() == otherTrack->GetNetCode() )
+                 continue;
+ 
+-            if( !otherTrack->IsType( trackTypes ) )
+-                continue;
++            // The shapes are at least as far apart as their boxes: a pair whose boxes are further
++            // apart than the smallest clearance found so far cannot lower it. Without this the
++            // search measures every pair and takes minutes on large boards
++            if( aData.minClearanceTrackToTrack < std::numeric_limits<int>::max() / 4 )
++            {
++                int64_t minClr = aData.minClearanceTrackToTrack;
++
++                if( a.bbox.SquaredDistance( b.bbox ) > minClr * minClr )
++                    continue;
++            }
+ 
+             int  actual = 0;
+-            auto trackShapeB = otherTrack->GetEffectiveShape( layer );
+             // The running minimum starts at INT_MAX; the collision code adds half widths and
+             // radii to the clearance, which overflowed and turned "no limit" into a negative one
+             int  clearance = std::min( aData.minClearanceTrackToTrack, std::numeric_limits<int>::max() / 4 );
+-            bool collide = trackShapeA->Collide( trackShapeB.get(), clearance, &actual );
++            bool collide = a.shape->Collide( b.shape.get(), clearance, &actual );
+ 
+             if( collide )
+                 aData.minClearanceTrackToTrack = std::min( aData.minClearanceTrackToTrack, actual );
+-- 
+2.43.0
+
