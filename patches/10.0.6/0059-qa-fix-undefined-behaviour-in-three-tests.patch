@@ -1,0 +1,87 @@
+From 768fabef590c3d83e17d01bf05f8420a61ad94bd Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Sun, 18 Oct 2026 16:05:18 +0900
+Subject: [PATCH 59/59] qa: fix undefined behaviour in three tests
+
+- test_property EnumGlob stored -1 in enum_glob, whose values are 0..7; use 2,
+  a valid value with no label, which tests the same thing.
+- PNSComponentDraggerBasicDrag ran the dragger with no routing settings, so
+  ROUTER::Settings() returned a null reference and Drag() crashed (SIGSEGV).
+  Load default settings like the other dragger tests.
+- KI_TEST::CheckFootprint() called FootprintNeedsUpdate() on library
+  footprints that have no board, which binds a null BOARD& for the stackup
+  check. Lend them an empty board for the check.
+
+Found by tools/bughunt (kicad-ja-plus, run 39090891417).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ qa/pcbnew_utils/board_test_utils.cpp | 19 ++++++++++++++++++-
+ qa/tests/common/test_property.cpp    |  4 +++-
+ qa/tests/pcbnew/test_pns_basics.cpp  |  5 +++++
+ 3 files changed, 26 insertions(+), 2 deletions(-)
+
+diff --git a/qa/pcbnew_utils/board_test_utils.cpp b/qa/pcbnew_utils/board_test_utils.cpp
+index 92a3a08ce..0d2da8385 100644
+--- a/qa/pcbnew_utils/board_test_utils.cpp
++++ b/qa/pcbnew_utils/board_test_utils.cpp
+@@ -480,7 +480,24 @@ void CheckFootprint( const FOOTPRINT* expected, const FOOTPRINT* fp )
+     // but neither is guaranteed to be complete).
+     WX_STRING_REPORTER reporter;
+ 
+-    if( const_cast<FOOTPRINT*>(expected)->FootprintNeedsUpdate(fp, BOARD_ITEM::COMPARE_FLAGS::DRC, &reporter) )
++    // FootprintNeedsUpdate() compares against the board stackup, so it needs a board. Library
++    // footprints have none: lend them an empty one for the check (a null BOARD& is undefined)
++    FOOTPRINT*             expectedFp = const_cast<FOOTPRINT*>( expected );
++    BOARD_ITEM_CONTAINER*  oldParent = expectedFp->GetParent();
++    std::unique_ptr<BOARD> tempBoard;
++
++    if( !expectedFp->GetBoard() )
++    {
++        tempBoard = std::make_unique<BOARD>();
++        expectedFp->SetParent( tempBoard.get() );
++    }
++
++    bool needsUpdate = expectedFp->FootprintNeedsUpdate( fp, BOARD_ITEM::COMPARE_FLAGS::DRC, &reporter );
++
++    if( tempBoard )
++        expectedFp->SetParent( oldParent );
++
++    if( needsUpdate )
+         BOOST_REQUIRE_MESSAGE( false,  reporter.GetMessages() );
+ }
+ 
+diff --git a/qa/tests/common/test_property.cpp b/qa/tests/common/test_property.cpp
+index 4449efe68..9cb2aea75 100644
+--- a/qa/tests/common/test_property.cpp
++++ b/qa/tests/common/test_property.cpp
+@@ -314,7 +314,9 @@ BOOST_AUTO_TEST_CASE( EnumGlob )
+     D item ;
+     wxString str;
+ 
+-    item.setGlobEnum( static_cast<enum_glob>( -1 ) );
++    // 2 has no label but is a valid enum_glob (its values fit in 3 bits); -1 is not, and
++    // loading it is undefined behaviour
++    item.setGlobEnum( static_cast<enum_glob>( 2 ) );
+     wxAny any = item.Get( prop );
+     BOOST_CHECK_EQUAL( any.GetAs<wxString>( &str ), false );
+ 
+diff --git a/qa/tests/pcbnew/test_pns_basics.cpp b/qa/tests/pcbnew/test_pns_basics.cpp
+index f5f33ecae..77c05cc20 100644
+--- a/qa/tests/pcbnew/test_pns_basics.cpp
++++ b/qa/tests/pcbnew/test_pns_basics.cpp
+@@ -806,6 +806,11 @@ BOOST_FIXTURE_TEST_CASE( PNSCollideSimpleNullShapeGuard, PNS_TEST_FIXTURE )
+  */
+ BOOST_FIXTURE_TEST_CASE( PNSComponentDraggerBasicDrag, PNS_TEST_FIXTURE )
+ {
++    // The dragger reads the routing mode from the router's settings; without them
++    // ROUTER::Settings() dereferences a null pointer
++    PNS::ROUTING_SETTINGS settings( nullptr, "" );
++    m_router->LoadSettings( &settings );
++
+     std::unique_ptr<PNS::NODE> world( new PNS::NODE );
+     world->SetMaxClearance( 10000000 );
+     world->SetRuleResolver( &m_ruleResolver );
+-- 
+2.43.0
+
