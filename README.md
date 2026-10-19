@@ -30,6 +30,7 @@ kicad-local render 基板.kicad_pcb iso      # 3D image without a GUI
 kicad-local render 基板.kicad_pcb top,bottom,iso-hq   # several views in one call (<board>_<view>.png, time per view)
 kicad-local step 基板.kicad_pcb --placeholder-boxes   # STEP; lists parts with no 3D model and substitutes an outline box (height from the Height field)
 kicad-local stats 基板.kicad_pcb           # part count, hole sizes, etc.
+kicad-local netlist 回路図.kicad_sch --json   # netlist as JSON (parts, fields, pin number/name/type, nets and their nodes); for a board, from the pad nets
 kicad-local drc 基板.kicad_pcb --strict    # also the 3 things DRC misses even at "0 violations" (pads without a net, tracks thinner than the netclass, stale zone fills)
 kicad-local why 基板.kicad_pcb             # for each unrouted pair, "why it can't be routed" (keepouts, copper of other nets, board outline), per layer
 kicad-local view 基板.kicad_pcb --drc --net GND   # annotated 2D image (highlighted nets, numbered DRC violations)

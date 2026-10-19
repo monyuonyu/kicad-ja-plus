@@ -28,6 +28,7 @@ kicad-local render 基板.kicad_pcb iso      # 画面なしで 3D 画像
 kicad-local render 基板.kicad_pcb top,bottom,iso-hq   # 視点をカンマで並べて 1 回で（<基板名>_<視点>.png、視点ごとの時間）
 kicad-local step 基板.kicad_pcb --placeholder-boxes   # STEP。3D モデルの無い部品を一覧にし、外形の箱（高さは欄 Height）で代用
 kicad-local stats 基板.kicad_pcb           # 部品数・穴径など
+kicad-local netlist 回路図.kicad_sch --json   # ネットリストを JSON に（部品・欄・端子の番号/名前/種類、ネットと端子）。基板ならパッドのネットから
 kicad-local drc 基板.kicad_pcb --strict    # DRC が「違反 0」でも見逃す 3 つ（ネットの無いパッド・ネットクラスより細い配線・古いベタ）も
 kicad-local why 基板.kicad_pcb             # 未配線の組ごとに「なぜ引けないか」（キープアウト・ほかのネットの銅・外形）を層ごとに
 kicad-local view 基板.kicad_pcb --drc --net GND   # 2D の図を注釈つきで画像に（ネットの強調・DRC の違反に番号）
