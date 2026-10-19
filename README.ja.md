@@ -25,6 +25,7 @@ kicad-local drc 基板.kicad_pcb            # DRC の要点（種類ごとの件
 kicad-local erc 回路図.kicad_sch
 kicad-local lint 回路図.kicad_sch          # 設計の定石からの外れ（外部の線の保護・ベース抵抗・電源のコンデンサ…）
 kicad-local render 基板.kicad_pcb iso      # 画面なしで 3D 画像
+kicad-local step 基板.kicad_pcb --placeholder-boxes   # STEP。3D モデルの無い部品を一覧にし、外形の箱（高さは欄 Height）で代用
 kicad-local stats 基板.kicad_pcb           # 部品数・穴径など
 kicad-local drc 基板.kicad_pcb --strict    # DRC が「違反 0」でも見逃す 3 つ（ネットの無いパッド・ネットクラスより細い配線・古いベタ）も
 kicad-local why 基板.kicad_pcb             # 未配線の組ごとに「なぜ引けないか」（キープアウト・ほかのネットの銅・外形）を層ごとに

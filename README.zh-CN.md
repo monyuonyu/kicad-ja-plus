@@ -27,6 +27,7 @@ kicad-local drc 基板.kicad_pcb            # DRC 要点（按类型的数量和
 kicad-local erc 回路図.kicad_sch
 kicad-local lint 回路図.kicad_sch          # 偏离设计惯例之处（外部线路的保护、基极电阻、电源电容……）
 kicad-local render 基板.kicad_pcb iso      # 无图形界面生成 3D 图像
+kicad-local step 基板.kicad_pcb --placeholder-boxes   # STEP；列出没有 3D 模型的元件，并用外形方块代替（高度取自 Height 字段）
 kicad-local stats 基板.kicad_pcb           # 元件数、孔径等
 kicad-local drc 基板.kicad_pcb --strict    # 另外检查 DRC 即使“0 违规”也会漏掉的 3 项（无网络的焊盘、比网络类更细的走线、过期的铺铜）
 kicad-local why 基板.kicad_pcb             # 对每一对未布线连接，按层说明“为什么布不通”（禁布区、其他网络的铜、板框）
