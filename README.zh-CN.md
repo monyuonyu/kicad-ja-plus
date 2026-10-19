@@ -47,6 +47,7 @@ EOF
 
 kicad-local sch 入力.kicad_sch 出力.kicad_sch 手順   # 无图形界面修改原理图（保存后检查连接和 BOM 的差异、ERC）
 kicad-local pcbsync 回路図 基板 出力                # 将原理图的修改同步到电路板
+kicad-local pcb update-from-schematic --dry-run --json 基板.kicad_pcb   # 同上，kicad-cli 风格；--dry-run 只报告变化，实际写入后再做 DRC 一致性检查
 kicad-local fabdiff 前.kicad_pcb 後.kicad_pcb 比較/  # 逐层比较生产数据，输出差异图像和位置列表
 kicad-local sim run 手順.toml --out 結果/            # 从原理图自动生成 SPICE 并仿真（ngspice）
 kicad-local review 新しい版 前の版 --out 確認/        # 一次完成 ERC、DRC、3D、差异和仿真 → 報告.md（报告）

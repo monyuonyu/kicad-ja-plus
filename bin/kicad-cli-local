@@ -23,4 +23,8 @@ export KICAD10_3DMODEL_DIR=/usr/share/kicad/3dmodels
 export KICAD8_TEMPLATE_DIR=/usr/share/kicad/template
 export KICAD9_TEMPLATE_DIR=/usr/share/kicad/template
 export KICAD10_TEMPLATE_DIR=/usr/share/kicad/template
+# kicad-cli に無い「回路図から基板を更新」(F8)は kicad-local の pcbsync へ
+if [ "$1" = pcb ] && [ "$2" = update-from-schematic ]; then
+  shift 2; PATH="$KICAD_LOCAL_HOME/bin:$PATH" exec kicad-python "$KICAD_LOCAL_HOME/tools/pcbsync.py" "$@"
+fi
 exec "$KICAD_LOCAL_BUILD/kicad/kicad-cli" "$@"

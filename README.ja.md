@@ -45,6 +45,7 @@ EOF
 
 kicad-local sch 入力.kicad_sch 出力.kicad_sch 手順   # 回路図を画面なしで直す（保存後に接続と部品表の差・ERC）
 kicad-local pcbsync 回路図 基板 出力                # 回路図の変更を基板へ
+kicad-local pcb update-from-schematic --dry-run --json 基板.kicad_pcb   # 同じことを kicad-cli 風に。--dry-run は変わる所だけ、書いたら DRC の照合まで
 kicad-local fabdiff 前.kicad_pcb 後.kicad_pcb 比較/  # 製造データを層ごとに比べ、差分画像と場所の一覧
 kicad-local sim run 手順.toml --out 結果/            # 回路図から自動で SPICE にして計算（ngspice）
 kicad-local review 新しい版 前の版 --out 確認/        # ERC・DRC・3D・差分・計算を 1 回で → 報告.md

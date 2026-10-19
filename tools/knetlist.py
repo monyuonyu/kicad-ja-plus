@@ -15,6 +15,19 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
+_ESC = {"{slash}": "/", "{backslash}": "\\", "{lt}": "<", "{gt}": ">", "{colon}": ":", "{dblquote}": '"',
+        "{comma}": ",", "{tab}": "\t", "{return}": "\n", "{space}": " "}
+
+
+def unescape(name):
+    """基板の中のネット名({slash} など)を、回路図のネットリストと同じ見た目に"""
+    if "{" not in name:
+        return name
+    for k, v in _ESC.items():
+        name = name.replace(k, v)
+    return name
+
+
 def from_sch(sch):
     with tempfile.TemporaryDirectory() as t:
         out = Path(t) / "n.xml"
@@ -58,16 +71,16 @@ def from_sch(sch):
     return {"source": "schematic", "file": sch, "components": list(comps.values()), "nets": nets}
 
 
-def from_pcb(pcb):
+def from_pcb(pcb, board=None):
     import pcbnew
-    b = pcbnew.LoadBoard(pcb)
+    b = board or pcbnew.LoadBoard(pcb)
     comps, nets = [], {}
     for f in b.GetFootprints():
         fields = {fl.GetName(): fl.GetText() for fl in f.GetFields()}
         pins = []
         for p in f.Pads():
             num = p.GetNumber()
-            net = p.GetNetname() or None
+            net = unescape(p.GetNetname()) or None
             pin = {"number": num, "name": p.GetPinFunction(), "type": p.GetPinType(), "net": net}
             pins.append(pin)
             if net and num:
@@ -80,7 +93,7 @@ def from_pcb(pcb):
                       "fields": fields, "pins": pins})
     codes = {}
     for name, ni in b.GetNetsByName().items():
-        codes[str(name)] = ni.GetNetCode()
+        codes[unescape(str(name))] = ni.GetNetCode()
     out = [{"name": n, "code": codes.get(n), "nodes": sorted(v, key=lambda d: (d["ref"], d["pin"]))} for n, v in nets.items()]
     out.sort(key=lambda n: (n["code"] is None, n["code"] or 0, n["name"]))
     return {"source": "board", "file": pcb, "components": comps, "nets": out}

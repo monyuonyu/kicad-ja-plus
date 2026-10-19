@@ -53,9 +53,12 @@ kicad-local: 改良した KiCad の道具をまとめた入口(保存形式は�
                                                 画面なしで回路図を直す(値・欄・記号の差し替え・削除・直列挿入・
                                                 部品追加・ラベル)。保存後に接続と部品表の差・ERC を表示
                                                 (命令は kicad-local sch --help)
-  kicad-local pcbsync <回路図> <基板> <出力> [--swap] [--at x,y]
-                                                回路図の変更を基板へ(画面の「回路図から基板を更新」)。部品の追加・
-                                                ネットの更新・つながりの変わった配線の削除。--swap でフットプリント差し替え
+  kicad-local pcbsync <回路図> <基板> <出力> [--swap] [--delete] [--at x,y] [--dry-run] [--json]
+  kicad-local pcb update-from-schematic [--schematic 回路図] -o 出力 <基板> [--dry-run] [--json]
+                                                回路図の変更を基板へ(画面の「回路図から基板を更新」F8)。値・欄・部品の追加・
+                                                ネットの更新・つながりの変わった配線の削除。--swap でフットプリント差し替え、
+                                                --delete で基板にだけある部品を消す。書いたあと回路図と照合(残りがあれば
+                                                終了コード 1)。--dry-run は書かずに変わる所だけ(--json で機械が読む形)
   kicad-local silkfix <入力> <出力> 部品番号 ... [--r 10]
                                                 部品番号の文字を重ならない所へ(route の silk より広く探す)
 シミュレーション(回路図から自動で組み立て、ngspice):
@@ -143,6 +146,8 @@ case "$cmd" in
     fi
     rc=$?; rm -rf "$t"; exit $rc ;;
   gerber) exec kicad-gerber "$@" ;;
+  pcb) [ "$1" = update-from-schematic ] && { shift; exec kicad-python "$KICAD_LOCAL_HOME/tools/pcbsync.py" "$@"; }
+       exec kicad-cli-local pcb "$@" ;;
   pcbsync) exec kicad-python "$KICAD_LOCAL_HOME/tools/pcbsync.py" "$@" ;;
   silkfix) exec kicad-python "$KICAD_LOCAL_HOME/tools/silkfix.py" "$@" ;;
   lint) exec python3 "$KICAD_LOCAL_HOME/tools/klint.py" "$@" ;;

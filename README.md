@@ -47,6 +47,7 @@ EOF
 
 kicad-local sch 入力.kicad_sch 出力.kicad_sch 手順   # edit a schematic without a GUI (after saving: connectivity and BOM diff, ERC)
 kicad-local pcbsync 回路図 基板 出力                # push schematic changes to the board
+kicad-local pcb update-from-schematic --dry-run --json 基板.kicad_pcb   # the same, kicad-cli style; --dry-run only reports changes, a real run ends with a DRC parity check
 kicad-local fabdiff 前.kicad_pcb 後.kicad_pcb 比較/  # compare fabrication output layer by layer, with diff images and a list of locations
 kicad-local sim run 手順.toml --out 結果/            # build SPICE automatically from the schematic and simulate (ngspice)
 kicad-local review 新しい版 前の版 --out 確認/        # ERC, DRC, 3D, diffs and simulation in one run → 報告.md (report)
