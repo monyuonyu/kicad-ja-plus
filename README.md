@@ -27,6 +27,7 @@ kicad-local drc 基板.kicad_pcb            # DRC summary (count and location pe
 kicad-local erc 回路図.kicad_sch
 kicad-local lint 回路図.kicad_sch          # departures from common design practice (protection on external lines, base resistors, supply capacitors...)
 kicad-local render 基板.kicad_pcb iso      # 3D image without a GUI
+kicad-local render 基板.kicad_pcb top,bottom,iso-hq   # several views in one call (<board>_<view>.png, time per view)
 kicad-local step 基板.kicad_pcb --placeholder-boxes   # STEP; lists parts with no 3D model and substitutes an outline box (height from the Height field)
 kicad-local stats 基板.kicad_pcb           # part count, hole sizes, etc.
 kicad-local drc 基板.kicad_pcb --strict    # also the 3 things DRC misses even at "0 violations" (pads without a net, tracks thinner than the netclass, stale zone fills)

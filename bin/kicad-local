@@ -35,9 +35,9 @@ kicad-local: 改良した KiCad の道具をまとめた入口(保存形式は�
   kicad-local erc <回路図.kicad_sch> [--json]  ERC を回して要点を表示。要確認があれば終了コード 1
   kicad-local lint <回路図.kicad_sch>          設計の定石からの外れを点検(外部の線の保護・ベース抵抗・
                                                 TVS/電解の向き・電源の入出力コンデンサ・つなぎ忘れ)
-  kicad-local render <基板> [視点] [出力.png] [--placeholder-boxes] [--height 5]
+  kicad-local render <基板> [視点,視点,...] [出力.png] [--placeholder-boxes] [--height 5]
                                                 3D 画像(既定 iso → <基板名>_iso.png)。視点は top/bottom/left/right/
-                                                front/back/iso/iso-hq
+                                                front/back/iso/iso-hq、カンマで並べると 1 回で全部(視点ごとの時間も)
   kicad-local step <基板> [出力.step] [--placeholder-boxes] [--height 5] [pcb export step の引数...]
                                                 STEP の書き出し。どちらも 3D モデルの無い部品を先に一覧にし、
                                                 --placeholder-boxes で F.Fab/F.CrtYd の外形の箱(高さは欄 Height)で代用

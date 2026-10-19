@@ -117,6 +117,7 @@ chk "kicad-local lint(デモ回路図は要確認 0 件)" "kicad-local lint sch/
 kicad-python tests/make_vh.py now/vh.kicad_pcb >/dev/null 2>&1
 chk "kicad-local models(モデルの無い J1・J2 を見つけ、終了コード 1)" "kicad-local models now/vh.kicad_pcb --json > now/vh_models.json; test \$? -eq 1 && python3 -c \"import json; d=json.load(open('now/vh_models.json')); assert sorted(r['ref'] for r in d['missing'])==['J1','J2'], d\""
 chk "kicad-local step --placeholder-boxes(箱の分だけ立体が 2 つ増え、J2 の高さは欄の 9.5mm)" "kicad-local step now/vh.kicad_pcb now/vh.step > now/vh_step.log 2>&1 && kicad-local step now/vh.kicad_pcb now/vhb.step --placeholder-boxes > now/vhb_step.log 2>&1 && test \$(grep -c MANIFOLD_SOLID_BREP now/vhb.step) -eq \$((\$(grep -c MANIFOLD_SOLID_BREP now/vh.step)+2)) && grep -q 'J2 .*×9.5 mm' now/vhb_step.log"
+chk "kicad-local render(視点をカンマで並べて 3 枚、視点ごとの時間)" "kicad-local render now/vh.kicad_pcb top,bottom,iso now/vhr.png --placeholder-boxes -w 320 -h 240 > now/vhr.log 2>&1 && test -s now/vhr_top.png && test -s now/vhr_bottom.png && test -s now/vhr_iso.png && grep -q '合計 .* 秒(3 枚)' now/vhr.log"
 
 # 終了コード: 配線の比較か道具の確認に NG が 1 つでもあれば 1（自動の試験が失敗を見逃さないように）
 if [ "$route_rc" -ne 0 ] || [ "$fails" -ne 0 ]; then

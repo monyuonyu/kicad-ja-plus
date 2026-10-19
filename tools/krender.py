@@ -2,14 +2,15 @@
 """
 krender: kicad-local render / step の中身(2026-10-20)
 
-  kicad-local render <基板> [視点] [出力.png] [--placeholder-boxes] [--height 5] [-w 1600 -h 1200]
-      視点は top / bottom / left / right / front / back / iso / iso-hq(出力を省くと <基板名>_<視点>.png)
+  kicad-local render <基板> [視点,視点,...] [出力.png] [--placeholder-boxes] [--height 5] [-w 1600 -h 1200]
+      視点は top / bottom / left / right / front / back / iso / iso-hq。カンマで並べると 1 回で全部描き、
+      出力は <出力の名前>_<視点>.png(出力を省くと <基板名>_<視点>.png)。視点ごとの時間を表示
   kicad-local step <基板> [出力.step] [--placeholder-boxes] [--height 5] [kicad-cli pcb export step の引数 ...]
 
 どちらも先に 3D モデルの無いフットプリントを一覧にする(STEP・画像では胴体が抜けるため)。
 --placeholder-boxes で、無いモデルを F.Fab / F.CrtYd の外形の箱に置き換えた基板の写しから作る(元の基板は変えない)。
 """
-import argparse, os, shutil, subprocess, sys, tempfile
+import argparse, os, shutil, subprocess, sys, tempfile, time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -64,15 +65,26 @@ def main():
             print("\n".join(l for l in msg.splitlines() if l.strip() and not l.startswith("Export time")))
             print(f"→ {out}" if r.returncode == 0 else f"失敗(終了コード {r.returncode})")
             return r.returncode
-        v = a.views
-        if v not in VIEWS:
-            sys.exit(f"視点 {v} は無い。使えるのは {' / '.join(VIEWS)}")
-        out = a.out or f"{stem}_{v}.png"
-        r = subprocess.run(["kicad-cli-local", "pcb", "render", *VIEWS[v], "-w", a.width, "-h", a.height_px,
-                            "-o", os.path.abspath(out), src], capture_output=True, text=True)
-        ok = r.returncode == 0 and Path(out).exists()
-        print(f"→ {out}" if ok else f"× 失敗\n{(r.stdout + r.stderr)[-800:]}")
-        return 0 if ok else 1
+        views = [v.strip() for v in a.views.split(",") if v.strip()]
+        bad = [v for v in views if v not in VIEWS]
+        if bad:
+            sys.exit(f"視点 {', '.join(bad)} は無い。使えるのは {' / '.join(VIEWS)}(カンマで並べると複数)")
+        if len(views) == 1:
+            outs = [a.out or f"{stem}_{views[0]}.png"]
+        else:
+            base = a.out[:-4] if a.out and a.out.lower().endswith(".png") else (a.out or stem)
+            outs = [f"{base}_{v}.png" for v in views]
+        rc, total = 0, time.time()
+        for v, out in zip(views, outs):
+            t = time.time()
+            r = subprocess.run(["kicad-cli-local", "pcb", "render", *VIEWS[v], "-w", a.width, "-h", a.height_px,
+                                "-o", os.path.abspath(out), src], capture_output=True, text=True)
+            ok = r.returncode == 0 and Path(out).exists()
+            print(f"→ {out}  ({v}、{time.time() - t:.1f} 秒)" if ok else f"× {v}: 失敗\n{(r.stdout + r.stderr)[-800:]}")
+            rc |= 0 if ok else 1
+        if len(views) > 1:
+            print(f"合計 {time.time() - total:.1f} 秒({len(views)} 枚)")
+        return rc
 
 
 if __name__ == "__main__":
