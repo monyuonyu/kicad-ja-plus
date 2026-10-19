@@ -56,6 +56,7 @@ def from_sch(sch):
                       "pins": [dict(p, net=None) for p in libpins.get((ls.get("lib"), ls.get("part")) if ls is not None else None, [])]}
     nets = []
     for n in root.find("nets").iter("net"):
+        n.set("name", unescape(n.get("name") or ""))   # 8.0.9 の kicadxml は {slash} のまま、10.0.6 は戻してある
         nodes = [{"ref": d.get("ref"), "pin": d.get("pin"), "name": d.get("pinfunction") or "", "type": d.get("pintype") or ""}
                  for d in n.iter("node")]
         nets.append({"name": n.get("name"), "code": int(n.get("code")), "nodes": nodes})
