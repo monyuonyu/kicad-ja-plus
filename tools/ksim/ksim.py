@@ -17,6 +17,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+# モデルの置き場(対応表 map.toml・定格 ratings.toml・base.lib): 既定はこの道具の models/。
+# 別の置き場(自分で足したモデルのある、入れた版の kicad-local-tools など)は KSIM_MODELS=フォルダ で
+MODELS = Path(os.path.expanduser(os.environ["KSIM_MODELS"])).resolve() if os.environ.get("KSIM_MODELS") else HERE / "models"
 import ngs  # noqa: E402
 
 # ---------------------------------------------------------------- ネットリスト
@@ -117,7 +120,7 @@ TAND_BY_VOLTAGE = ((6.3, 0.22), (10, 0.19), (16, 0.16), (25, 0.14), (35, 0.12), 
 class Builder:
     def __init__(self, comps, nets, spec):
         self.comps, self.nets, self.spec = comps, nets, spec
-        self.mapping = dict( tomllib.loads( ( HERE / "models" / "map.toml" ).read_text( encoding="utf-8" ) ).get( "map", {} ) )
+        self.mapping = dict( tomllib.loads( ( MODELS / "map.toml" ).read_text( encoding="utf-8" ) ).get( "map", {} ) )
         self.mapping.update( spec.get("models", {}).get("map", {}) )
         self.exclude = spec.get("exclude", {}).get("refs", [])
         self.params = spec.get("parts", {})
@@ -176,7 +179,16 @@ class Builder:
             return "0"
         if re.match(r'^[a-z][a-z0-9_]*$', name) and not re.match(r'^n[0-9]+$', name):
             return name   # 手順ファイルの中だけで使う補助の点(例 gpio)。そのままの名前で使う
-        raise SystemExit(f"ネットが見つからない: {name}(ksim nets で名前を確認。補助の点は英小文字で)")
+        import difflib
+        near = difflib.get_close_matches(name, list(self.node), n=4, cutoff=0.4)
+        upper = name.upper()
+        near += [n for n in self.node if upper and upper in n.upper() and n not in near][:4]
+        raise SystemExit(
+            f"ネットが見つからない: {name}\n"
+            "  書き方は 3 通り: 回路図のネット名そのまま(名前の無いネットは Net-(A1-3V3) のような自動の名前)、"
+            "部品.端子(例 A1.9、R3.1)、手順の中だけの補助の点(英小文字で始まる名前、例 gpio)\n"
+            + (f"  近い名前: {', '.join(near[:6])}\n" if near else "")
+            + "  ネット名の一覧: kicad-local sim nets <回路図>")
 
     def pin(self, c, fn=None, num=None):
         for p, d in c["pins"].items():
@@ -289,7 +301,7 @@ class Builder:
         if c["lib"].split(":")[-1] not in ("C_Polarized", "CP"):
             return None, ""
         if not hasattr(self, "_caps"):
-            self._caps = tomllib.loads((HERE / "models" / "ratings.toml").read_text(encoding="utf-8")).get("capacitor", {})
+            self._caps = tomllib.loads((MODELS / "ratings.toml").read_text(encoding="utf-8")).get("capacitor", {})
         mpn = part_number(c)
         d = next((d for k, d in self._caps.items() if mpn and k in mpn), None)
         if d:
@@ -396,12 +408,15 @@ def translate_signal(sig, b):
             vec = f"@{letter}{name}[{key}]".lower()
             return vec, [vec]
         for src in b.spec.get("sources", []):   # [[sources]] の名前(V を付けて SPICE の素子名にする)
-            if src["name"] == name:
+            if src["name"].lower() == name.lower():   # SPICE は大文字小文字を区別しない
                 if src.get("type", "V").upper() == "I":
-                    vec = f"@i{name}[current]".lower()
+                    vec = f"@i{src['name']}[current]".lower()
                     return vec, [vec]
-                return f"i(v{name.lower()})", []
-        return f"i({name})", []
+                return f"i(v{src['name'].lower()})", []
+        if re.match(r'^[A-Za-z][A-Za-z0-9_]*$', name) and name.upper()[0] in "VIEHBRLC":
+            return f"i({name})", []   # [extra] に書いた素子(VSENSE など)
+        raise SystemExit(f"電流の信号 i({name}) の {name} が分からない: 電源の名前({', '.join(s['name'] for s in b.spec.get('sources', [])) or 'なし'})"
+                         f"、部品番号(例 R3)、[extra] に書いた素子(V・I・R・L・C で始まる名前)のどれか")
     return sig, []
 
 # ---------------------------------------------------------------- 測定
@@ -563,7 +578,7 @@ def stress_collect(b, spec):
 
 
 def load_ratings():
-    return tomllib.loads((HERE / "models" / "ratings.toml").read_text(encoding="utf-8"))
+    return tomllib.loads((MODELS / "ratings.toml").read_text(encoding="utf-8"))
 
 
 def part_rating(c, rt):
@@ -714,10 +729,11 @@ def resolve(spec, p):
     p = Path(os.path.expanduser(p))
     if p.is_absolute():
         return p
-    for base in (spec["_dir"], HERE):
-        if (base / p).exists():
-            return base / p
-    return spec["_dir"] / p
+    # 手順のフォルダ → モデルの置き場(KSIM_MODELS。"models/x.lib" は置き場の x.lib)→ この道具
+    for cand in (spec["_dir"] / p, MODELS / (p.relative_to("models") if p.parts[:1] == ("models",) else p), HERE / p):
+        if cand.exists():
+            return cand.resolve()
+    raise SystemExit(f"モデルのファイルが見つからない: {p}(探した所: {spec['_dir']}、{MODELS}、{HERE})")
 
 
 def draw_params(spec, rng):
@@ -746,7 +762,20 @@ def subst(text, b, pv):
     return re.sub(r'\{p:([^}]+)\}', pr, text)
 
 
+def check_sources(spec):
+    """[[sources]] の名前は SPICE の素子名になる: 英字で始まる英数字と _ だけ"""
+    for s in spec.get("sources", []):
+        name = str(s.get("name", ""))
+        if not re.match(r'^[A-Za-z][A-Za-z0-9_]*$', name):
+            raise SystemExit(f"[[sources]] の name = {name!r} は使えない: SPICE の素子名になるので、英字で始まる英数字と _ だけ"
+                             "(例 BAT、VIN_24)。大文字小文字は区別しない(i(bat) と i(BAT) は同じ)")
+        for key in ("plus", "minus", "value"):
+            if key not in s:
+                raise SystemExit(f"[[sources]] {name}: {key} が無い(plus・minus はネット名 / 部品.端子 / GND、value は \"DC 24\" など)")
+
+
 def make_circuit(b, spec, rng=None, tolerances=None):
+    check_sources(spec)
     lines, skipped = b.build(rng, tolerances)
     pv = draw_params(spec, rng)
     inc = [f".include {resolve(spec, x)}" for x in spec.get("models", {}).get("include", ["models/base.lib"])]
@@ -959,7 +988,7 @@ def cmd_run(args):
 
     md = [f"# {spec.get('title', 'シミュレーション')}", "",
           f"- 回路図: `{sch}`", f"- 解析: {describe_analysis(spec.get('analysis', {}))}",
-          f"- モデル: {', '.join(spec.get('models', {}).get('include', ['models/base.lib']))}"
+          f"- モデル: {', '.join(str(resolve(spec, x)) for x in spec.get('models', {}).get('include', ['models/base.lib']))}"
           "(データシートの値に当てはめたもの。根拠は models/base.lib の注記)", ""]
     if spec.get("note"):
         md += [spec["note"], ""]

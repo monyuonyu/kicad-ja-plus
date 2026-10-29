@@ -31,6 +31,10 @@ kicad-local sim parts --sch <回路図>          # 部品がどう SPICE 化さ�
   コイルの巻線の抵抗は DCR 欄か値の「0.12Ω」。分からないコイルは抵抗 0 のまま「モデルの前提」に出す(L と C だけだと鳴き続ける)。
 - 定格が分からず判定できなかった部品は「未判定」として結果と画面に出す(NG 0 でも、それらは確かめていない)。
 
+モデルの置き場(`map.toml`・`ratings.toml`・`base.lib`)は既定でこの道具の `models/`。自分で足したモデルのある別の置き場
+(入れた版の kicad-local-tools の models など)を使うときは `KSIM_MODELS=フォルダ`。`[models] include` の `models/x.lib` は
+手順のフォルダ → `KSIM_MODELS` → この道具の順に探し、実際に読んだ場所を結果.md の「モデル」に出す。
+
 モデルの対応表(値 → モデル)は `models/map.toml`。手順ファイルの `[models] map` で上書きできる。
 モデルは `models/base.lib`。**メーカー配布のモデルではなく、データシートの代表値に当てはめたもの**(各モデルの
 前に根拠を書いてある)。メーカー版を入手したら `models/vendor/` に置き、`[models] include` と `map` で差し替える。
