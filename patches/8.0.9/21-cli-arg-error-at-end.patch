@@ -1,0 +1,16 @@
+diff --git a/kicad/kicad_cli.cpp b/kicad/kicad_cli.cpp
+index 2235b97..893d1da 100644
+--- a/kicad/kicad_cli.cpp
++++ b/kicad/kicad_cli.cpp
+@@ -445,6 +445,11 @@ int PGM_KICAD::OnPgmRun()
+             printHelp( argParser );
+         }
+ 
++        // The error once more at the end, on stderr: above a long usage it was missed, and
++        // nothing was written (ローカル修正: an unknown option of drill export went unseen)
++        wxFprintf( stderr, "\nError: %s (nothing was done, exit code %d)\n", err.what(),
++                   CLI::EXIT_CODES::ERR_ARGS );
++
+         return CLI::EXIT_CODES::ERR_ARGS;
+     }
+ 

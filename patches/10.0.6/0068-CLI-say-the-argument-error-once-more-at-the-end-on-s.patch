@@ -1,0 +1,33 @@
+From 461d047072a8919edb965b6d0a157c813e77faab Mon Sep 17 00:00:00 2001
+From: shota <monyuonyu@gmail.com>
+Date: Thu, 29 Oct 2026 12:05:25 +0900
+Subject: [PATCH] CLI: say the argument error once more at the end, on stderr
+
+Above a long usage text the error line of an unknown option was missed
+(drill export wrote nothing and it went unseen). Local change.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ kicad/kicad_cli.cpp | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/kicad/kicad_cli.cpp b/kicad/kicad_cli.cpp
+index ceae354c3..a11164a81 100644
+--- a/kicad/kicad_cli.cpp
++++ b/kicad/kicad_cli.cpp
+@@ -496,6 +496,12 @@ int PGM_KICAD::OnPgmRun()
+             printHelp( argParser );
+         }
+ 
++        // The error once more at the end, on stderr: above a long usage it was missed, and
++        // nothing was written (ローカル修正: an unknown option of drill export went unseen)
++        if( !requestedHelp )
++            wxFprintf( stderr, "\nError: %s (nothing was done, exit code %d)\n", err.what(),
++                       CLI::EXIT_CODES::ERR_ARGS );
++
+         return requestedHelp ? 0 : CLI::EXIT_CODES::ERR_ARGS;
+     }
+ 
+-- 
+2.43.0
+

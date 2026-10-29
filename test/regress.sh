@@ -129,6 +129,11 @@ mkdir -p now/bom && kicad-python tests/make_bom.py in.kicad_pcb now/bom > /dev/n
 chk "kicad-local bom check(C5・C7 だけ間隔の食い違い、終了コード 1)" "kicad-local bom check now/bom/bom.kicad_pcb --json > now/bom/check.json 2>/dev/null; test \$? -eq 1 && python3 -c \"import json; d=json.load(open('now/bom/check.json')); assert sorted(p['ref'] for p in d['pitch'] if p['ok'] is False)==['C5','C7'] and sorted(p['ref'] for p in d['pitch'] if p['ok'])==['C4','C6'], d['pitch']\""
 chk "kicad-local bom update(R3 の 22K だけ 10K に、ほかの中身はそのまま)" "kicad-local bom update sch/interf_u.kicad_sch now/bom/bom.xlsx -o now/bom/new.xlsx > now/bom/update.log 2>&1 && grep -q '行 4(R3): 22K → 10K' now/bom/update.log && kicad-local bom check sch/interf_u.kicad_sch --bom now/bom/new.xlsx 2>/dev/null | grep -q '値の違い: 0 件' && python3 -c \"import zipfile; a=zipfile.ZipFile('now/bom/bom.xlsx'); b=zipfile.ZipFile('now/bom/new.xlsx'); assert [n for n in a.namelist() if a.read(n)!=b.read(n)]==['xl/worksheets/sheet1.xml']\""
 
+# 入稿データ: デモの基板はドリルマーク「小さい印」と DRC の要確認があるので、確認で止まり(終了コード 1・zip なし)、
+# --force で作ると外形・レジストを含む 9 ファイル、ドリルは 1 本(mm)
+chk "kicad-local fab(確認で止まる。--force で外形とレジストのある zip、ドリル 1 本)" "rm -rf now/fab && mkdir -p now/fab && cp in.kicad_pcb in.kicad_pro now/fab/; kicad-local fab now/fab/in.kicad_pcb --json > now/fab/check.json; test \$? -eq 1 && test ! -e now/fab/in_入稿.zip && python3 -c \"import json; d=json.load(open('now/fab/check.json')); assert {c['kind'] for c in d['checks']}=={'drill_marks','drc'}, d\" && kicad-local fab now/fab/in.kicad_pcb --force > now/fab/force.log; test -s now/fab/in_入稿.zip && python3 -c \"import zipfile; n=zipfile.ZipFile('now/fab/in_入稿.zip').namelist(); assert any(x.endswith('.gm1') for x in n) and any(x.endswith('.gts') for x in n) and [x for x in n if x.endswith('.drl')]==['in.drl'], n\" && grep -q 'unit\\|METRIC' <(unzip -p now/fab/in_入稿.zip in.drl)"
+chk "kicad-cli の引数の誤りを最後にもう一度(標準エラー、終了コード 1)" "kicad-cli-local pcb export drill --no-such-option -o now/ in.kicad_pcb 2>&1 >/dev/null | tail -1 | grep -q '^Error: Unknown argument: --no-such-option'"
+
 # 終了コード: 配線の比較か道具の確認に NG が 1 つでもあれば 1（自動の試験が失敗を見逃さないように）
 if [ "$route_rc" -ne 0 ] || [ "$fails" -ne 0 ]; then
   echo "NG あり（配線の比較: $([ "$route_rc" -eq 0 ] && echo OK || echo NG)、道具の確認の NG: $fails 件）"

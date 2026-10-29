@@ -280,6 +280,10 @@ def main():
         print()
     else:
         human(d, strict, note)
+        m = re.search(r"\(pcbplotparams.*?\(drillshape\s+(\d+)\)", board.read_text(encoding="utf-8"), re.S)
+        if m and m.group(1) != "0":
+            print(f"参考: 製造データの出力設定でドリルマークが「あり」(drillshape {m.group(1)})。このままガーバーを出すと"
+                  "穴の位置に印が入る(入稿データは kicad-local fab で。ドリルマークなしで出し、発注前の確認もする)")
     return 0 if problems == 0 else 1
 
 
