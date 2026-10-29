@@ -133,12 +133,22 @@ import pcbnew, sys
 b = pcbnew.LoadBoard(sys.argv[1]); b.FindFootprintByReference("L1").SetField("MPN", "FOO123A"); b.Save(sys.argv[1])
 PY
 chk "kicad-local bom check の未確認(L1 FOO123A、データシートの行が候補)と bom record" "kicad-local bom check now/bom/bom.kicad_pcb --json 2>/dev/null > now/bom/unconf.json; python3 -c \"import json; d=json.load(open('now/bom/unconf.json')); u=[x for x in d['unconfirmed'] if x['ref']=='L1'][0]; assert any('FOO123A' in h[2] and '5.0 mm' in h[2] for h in u['hints']), u\" && kicad-local bom record FOO123A 5.0 --src 'FOO.pdf p.1' --dir now/bom && kicad-local bom check now/bom/bom.kicad_pcb --json 2>/dev/null > now/bom/rec.json; python3 -c \"import json; d=json.load(open('now/bom/rec.json')); assert not [x for x in d['unconfirmed'] if x['ref']=='L1'] and [p for p in d['pitch'] if p['ref']=='L1' and p['ok'] and p['rule']=='案件の記録'], d\""
+# 未確認に出さないもの: 品番の欄が説明文(C9)、アキシャルの抵抗(R1。間隔は曲げ方で決まる)
+cp now/bom/bom.kicad_pcb now/bom/noise.kicad_pcb && kicad-python - now/bom/noise.kicad_pcb <<'PY' > /dev/null 2>&1
+import pcbnew, sys
+b = pcbnew.LoadBoard(sys.argv[1])
+b.FindFootprintByReference("C9").SetField("MPN", "セラミックコンデンサ 0.1uF 50V")
+b.FindFootprintByReference("R1").SetField("MPN", "CFS1-4CT52R103J")
+b.Save(sys.argv[1])
+PY
+chk "kicad-local bom check: 説明文の品番(C9)とアキシャル(R1)は未確認に出さない" "kicad-local bom check now/bom/noise.kicad_pcb --json 2>/dev/null > now/bom/noise.json; python3 -c \"import json; d=json.load(open('now/bom/noise.json')); u=[x['ref'] for x in d['unconfirmed']]; assert 'C9' not in u and 'R1' not in u and 'C9' in d['skipped']['description'] and 'R1' in d['skipped']['axial'], d['skipped']\""
 chk "部品表の見出しのふりがな(<rPh>)を読まない(品番の列が見つかる)" "python3 -c \"import sys; sys.path.insert(0, '$KICAD_LOCAL_HOME/tools'); import kbom; b=kbom.read_bom('now/bom/bom.xlsx'); assert b['cols']['pn']==2 and b['cols']['ref']==0, b['cols']\""
 chk "kicad-local bom update(R3 の 22K だけ 10K に、ほかの中身はそのまま)" "kicad-local bom update sch/interf_u.kicad_sch now/bom/bom.xlsx -o now/bom/new.xlsx > now/bom/update.log 2>&1 && grep -q '行 4(R3): 22K → 10K' now/bom/update.log && kicad-local bom check sch/interf_u.kicad_sch --bom now/bom/new.xlsx 2>/dev/null | grep -q '値の違い: 0 件' && python3 -c \"import zipfile; a=zipfile.ZipFile('now/bom/bom.xlsx'); b=zipfile.ZipFile('now/bom/new.xlsx'); assert [n for n in a.namelist() if a.read(n)!=b.read(n)]==['xl/worksheets/sheet1.xml']\""
 
 # 入稿データ: デモの基板はドリルマーク「小さい印」と DRC の要確認があるので、確認で止まり(終了コード 1・zip なし)、
 # --force で作ると外形・レジストを含む 9 ファイル、ドリルは 1 本(mm)
 chk "kicad-local fab(確認で止まる。--force で外形とレジストのある zip、ドリル 1 本)" "rm -rf now/fab && mkdir -p now/fab && cp in.kicad_pcb in.kicad_pro now/fab/; kicad-local fab now/fab/in.kicad_pcb --json > now/fab/check.json; test \$? -eq 1 && test ! -e now/fab/in_入稿.zip && python3 -c \"import json; d=json.load(open('now/fab/check.json')); assert {c['kind'] for c in d['checks']}=={'drill_marks','drc'}, d\" && kicad-local fab now/fab/in.kicad_pcb --force > now/fab/force.log; test -s now/fab/in_入稿.zip && python3 -c \"import zipfile; n=zipfile.ZipFile('now/fab/in_入稿.zip').namelist(); assert any(x.endswith('.gm1') for x in n) and any(x.endswith('.gts') for x in n) and [x for x in n if x.endswith('.drl')]==['in.drl'], n\" && grep -q 'unit\\|METRIC' <(unzip -p now/fab/in_入稿.zip in.drl)"
+chk "kicad-local fab --name(zip の中のファイル名とガーバーの ProjectId が英字の名前)" "kicad-local fab now/fab/in.kicad_pcb --force --name brake -o now/fab/named.zip > /dev/null 2>&1; python3 -c \"import zipfile; z=zipfile.ZipFile('now/fab/named.zip'); n=z.namelist(); assert 'brake.drl' in n and all(x.startswith('brake') for x in n), n; g=[x for x in n if x.endswith('.gtl')][0]; assert b'%TF.ProjectId,brake,' in z.read(g)\""
 chk "kicad-cli の引数の誤りを最後にもう一度(標準エラー、終了コード 1)" "kicad-cli-local pcb export drill --no-such-option -o now/ in.kicad_pcb 2>&1 >/dev/null | tail -1 | grep -q '^Error: Unknown argument: --no-such-option'"
 
 # 終了コード: 配線の比較か道具の確認に NG が 1 つでもあれば 1（自動の試験が失敗を見逃さないように）

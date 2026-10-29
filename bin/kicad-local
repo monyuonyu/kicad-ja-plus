@@ -82,7 +82,7 @@ kicad-local: 改良した KiCad の道具をまとめた入口(保存形式は�
                                                 シミュレーション(定格チェックつき)を 1 回で → 出力/報告.md
                                                 (版はフォルダか .kicad_pro/.kicad_sch/.kicad_pcb)
 発注:
-  kicad-local fab <基板> [-o 入稿.zip] [--paste] [--check-only] [--force]
+  kicad-local fab <基板> [-o 入稿.zip] [--name brake] [--paste] [--check-only] [--force]
                                                 発注前の確認(ドリルマークの設定・DRC・外形)のあと、入稿の zip
                                                 (ガーバー＋mm で 1 本にまとめたドリル、ドリルマークなし。P板.com の形)。
                                                 確認に引っかかれば作らず終了コード 1(--force で作る)

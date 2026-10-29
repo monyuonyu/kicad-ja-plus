@@ -2,7 +2,7 @@
 """
 kfab: 発注前の確認と、基板屋への入稿データ(kicad-local fab。2026-10-29)
 
-  kicad-local fab <基板.kicad_pcb> [-o 入稿.zip] [--paste] [--check-only] [--force] [--json]
+  kicad-local fab <基板.kicad_pcb> [-o 入稿.zip] [--name brake] [--paste] [--check-only] [--force] [--json]
 
   1. 発注前の確認(どれか引っかかれば zip は作らず終了コード 1。--force で作る)
      - 製造データの出力設定のドリルマーク(drillshape)が「なし」でない(穴の位置に印が入ったガーバーになる)
@@ -11,6 +11,8 @@ kfab: 発注前の確認と、基板屋への入稿データ(kicad-local fab。2
   2. ガーバー(銅箔の全層・レジスト・シルク・外形。--paste でペースト。ドリルマークなし)と、ドリル(Excellon、mm、
      めっき穴とめっき無しの穴を 1 つにまとめる)を書き、要る層がそろっているかを確かめて zip に
   中身は P板.com の入稿の形(ガーバー RS-274X ＋ Excellon のドリル 1 本、mm、ドリルマークなし)。ほかの基板屋も同じ形で受ける
+  --name: zip の中のファイル名とガーバーの %TF.ProjectId に使う名前(英字。基板の名前が日本語だと、ファイル名が
+          日本語になり ProjectId は「____」に化ける。基板屋のアップローダーや CAM には日本語を嫌うところがある)
   --paste: メタルマスク用にペースト層も入れる
   --check-only: 確認だけ(zip を作らない)
 
@@ -69,17 +71,18 @@ def run(cmd):
     return r
 
 
-def make(board, out, paste=False):
+def make(board, out, paste=False, name=None):
     text = board.read_text(encoding="utf-8")
     pp = plot_params(text)
     aux = re.search(r"\(useauxorigin\s+(yes|true)\)", pp) is not None
     with tempfile.TemporaryDirectory() as t:
         t = Path(t)
         # 写しに: ドリルマークは「なし」に(元のファイルは変えない)
-        work = t / board.name
+        stem = name or board.stem
+        work = t / (stem + ".kicad_pcb")
         work.write_text(re.sub(r"\(drillshape\s+\d+\)", "(drillshape 0)", text), encoding="utf-8")
         for side in board.parent.glob(board.stem + ".kicad_pro"):
-            shutil.copy(side, t / side.name)
+            shutil.copy(side, t / (stem + ".kicad_pro"))
         g = t / "gbr"
         g.mkdir()
         # 層は入稿に要るものを決めて出す(基板の出力設定の層の選び方は人によって違い、外形やレジストが抜けていた)
@@ -114,6 +117,7 @@ def main():
     ap.add_argument("board")
     ap.add_argument("-o", "--output")
     ap.add_argument("--paste", action="store_true")
+    ap.add_argument("--name", help="zip の中のファイル名・ProjectId に使う英字の名前")
     ap.add_argument("--check-only", action="store_true")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--json", action="store_true")
@@ -126,7 +130,10 @@ def main():
     result = {"board": str(board), "checks": found, "written": None}
     if not a.check_only and (not found or a.force):
         out = Path(a.output or board.with_name(f"{board.stem}_入稿.zip"))
-        result["written"] = make(board, out, a.paste)
+        if a.name and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", a.name):
+            print(f"--name は英数字と _ . - だけ: {a.name}", file=sys.stderr)
+            return 2
+        result["written"] = make(board, out, a.paste, a.name)
     if a.json:
         print(json.dumps(result, ensure_ascii=False, indent=1))
     else:
@@ -139,6 +146,8 @@ def main():
                   f"めっき穴とめっき無しを 1 つに、ドリルマークなし)")
             for n in w["files"]:
                 print(f"    {n}")
+            if not a.name and not board.stem.isascii():
+                print(f"  注意: ファイル名とガーバーの ProjectId が日本語の名前({board.stem})。日本語を嫌う基板屋には --name brake のように英字の名前を")
         elif found and not a.check_only:
             print("入稿データは作らなかった(直してからもう一度。このまま作るなら --force)")
     return 1 if found else 0

@@ -12,7 +12,9 @@ kbom: 部品表(BOM)と回路図・基板の照合(kicad-local bom。2026-10-29)
       確かめたリード間隔を案件の記録(kbom_確認済み.toml)に残す。次の check から使う
 
 リード間隔の根拠は、案件の記録 → tools/bomrules.toml の規則(メーカーの資料で確かめた系列だけ)の順。
-どちらにも無い品番で、フットプリントに間隔のある部品(挿入部品)は「未確認」として必ず出す(黙って通さない)。
+どちらにも無い品番で、フットプリントに間隔のある 2 端子の部品(挿入部品)は「未確認」として必ず出す(黙って通さない)。
+見ないもの(数だけ出す): 品番の欄が説明文、品番がフットプリント名に入っている(その部品用)、アキシャル部品
+(間隔はリードの曲げ方)、3 端子以上(コネクタなど)。
 案件のフォルダ(または datasheets/・データシート/)にデータシートの PDF があれば、その品番の行と間隔の
 候補を頁つきで出す。確かめたら bom record で記録する(前もって規則を並べるのではなく、使った部品の分だけ)。
 部品表の列は見出しから探す: 部品番号(Reference・Ref・Designator・部品番号・記号)、品番(MPN・品番・型番・
@@ -235,6 +237,20 @@ def datasheet_hints(folder, pn, comp):
     return out
 
 
+def looks_like_part_number(pn):
+    """A maker's part number (RDER71H104K0P1H03B, B3B-XH-A), not a description put in its place
+    (「カーボン抵抗±5%品、1/4W」 went to the unconfirmed: 51 of them hid the real NG)"""
+    return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9\-_/.#+(),]{2,}", pn)) and bool(re.search(r"\d", pn)) \
+        and bool(re.search(r"[A-Za-z]", pn))
+
+
+def axial(footprint):
+    """An axial part (resistor, DO-15 diode): its pitch is where the leads are bent, chosen on
+    the board, not a part's"""
+    return bool(re.search(r"Axial|DIN\d{4}|_DO-\d+|_DO-?41|_DO-?35|_Horizontal", footprint or "")) \
+        and not re.search(r"Radial", footprint or "")
+
+
 def check(design, bom_path=None):
     src = str(design)
     folder = Path(src).resolve().parent
@@ -245,6 +261,7 @@ def check(design, bom_path=None):
     bom = read_bom(bom_path) if bom_path else None
     rules = load_rules()
     pitch, missing, extra, values, unconfirmed, no_pn = [], [], [], [], [], []
+    skipped = {"description": [], "in_footprint": [], "axial": [], "many_pins": []}
     for ref, c in sorted(comps.items(), key=lambda kv: (re.sub(r"\d", "", kv[0]), int(re.sub(r"\D", "", kv[0]) or 0))):
         pn = part_number(c.get("fields", {}))
         if bom and ref in bom["refs"] and bom["refs"][ref]["pn"]:
@@ -253,8 +270,12 @@ def check(design, bom_path=None):
         how = "フットプリントの名前"
         if ref in measured:
             have, how = measured[ref], "基板の穴の間隔"
-        if not pn:
+        if pn and not looks_like_part_number(pn):
             if have is not None:
+                skipped["description"].append(ref)
+            pn = ""
+        if not pn:
+            if have is not None and not axial(c.get("footprint", "")) and len(c.get("pins") or []) == 2:
                 no_pn.append(ref)
             continue
         if pn in recs:
@@ -262,8 +283,17 @@ def check(design, bom_path=None):
         else:
             got = pitch_of_pn(pn, rules)
         if not got:
-            if have is not None:   # 挿入部品: 間隔が合っているかを、まだ誰も確かめていない
-                unconfirmed.append({"ref": ref, "pn": pn, "footprint": c.get("footprint", ""), "fp_pitch": have,
+            if have is None:
+                continue
+            fp = c.get("footprint", "")
+            if re.sub(r"[-_ ]", "", pn.upper()) in re.sub(r"[-_ ]", "", fp.upper()):
+                skipped["in_footprint"].append(ref)   # the footprint was made for this part (JST B3B-XH-A)
+            elif axial(fp):
+                skipped["axial"].append(ref)
+            elif len(c.get("pins") or []) != 2:
+                skipped["many_pins"].append(ref)      # a connector: its pitch is its family's, not a lead's
+            else:   # a 2-lead part: whether its leads fit the holes, nobody has checked yet
+                unconfirmed.append({"ref": ref, "pn": pn, "footprint": fp, "fp_pitch": have,
                                     "hints": datasheet_hints(folder, pn, c)})
             continue
         want, rule, why = got
@@ -281,7 +311,7 @@ def check(design, bom_path=None):
         for ref, row in sorted(bom["refs"].items()):
             if ref in comps and row["value"] and _norm(row["value"]) != _norm(comps[ref]["value"]):
                 values.append({"ref": ref, "bom": row["value"], "design": comps[ref]["value"], "row": row["row"]})
-    return {"pitch": pitch, "unconfirmed": unconfirmed, "no_part_number": no_pn, "bom_missing": missing, "bom_extra": extra, "values": values,
+    return {"pitch": pitch, "unconfirmed": unconfirmed, "no_part_number": no_pn, "skipped": skipped, "bom_missing": missing, "bom_extra": extra, "values": values,
             "record_file": str(folder / RECORD)}
 
 
@@ -399,14 +429,20 @@ def main():
                 print(f"  {mark} {p['ref']} {p['pn']}: 品番 {p['pn_pitch']:g}mm({p['rule']})"
                       f" / {p['note']} {p['fp_pitch'] if p['fp_pitch'] is not None else '—'}mm  {p['footprint']}")
             if r["unconfirmed"]:
-                print(f"未確認 {len(r['unconfirmed'])} 部品(品番からリード間隔の根拠が取れない挿入部品。確かめたら bom record で記録):")
+                print(f"未確認 {len(r['unconfirmed'])} 部品(品番からリード間隔の根拠が取れない 2 端子の挿入部品。確かめたら bom record で記録):")
                 for u in r["unconfirmed"]:
                     print(f"  ? {u['ref']} {u['pn']}: フットプリント {u['fp_pitch']:g}mm  {u['footprint']}")
                     for f, page, line in u["hints"]:
                         print(f"      候補 {f} p.{page}: {line}")
+            names = {"description": "品番の欄が説明文(品番なしとして数える)", "in_footprint": "品番がフットプリント名に入っている(その部品用)",
+                     "axial": "アキシャル部品(間隔はリードの曲げ方で決まる)", "many_pins": "3 端子以上(コネクタなど。間隔は系列で決まる)"}
+            for key, label in names.items():
+                if r["skipped"][key]:
+                    print(f"見ない: {label} {len(r['skipped'][key])} 個: " + ", ".join(r["skipped"][key][:12])
+                          + (" …" if len(r["skipped"][key]) > 12 else ""))
             if r["no_part_number"]:
                 n = r["no_part_number"]
-                print(f"品番の無い挿入部品 {len(n)} 個(間隔を確かめられない。回路図の MPN 欄か --bom の部品表に品番を): "
+                print(f"品番の無い 2 端子の挿入部品 {len(n)} 個(間隔を確かめられない。回路図の MPN 欄か --bom の部品表に品番を): "
                       + ", ".join(n[:20]) + (" …" if len(n) > 20 else ""))
             if a.bom:
                 print(f"部品表に無い部品: {', '.join(r['bom_missing']) or 'なし'}")
