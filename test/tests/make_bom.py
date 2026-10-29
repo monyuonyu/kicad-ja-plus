@@ -12,7 +12,12 @@ for f, pn in zip(caps, pns):
     print(f.GetReference(), pn)
 b.Save(os.path.join(sys.argv[2], "bom.kicad_pcb"))
 ss = ["部品番号", "値", "品番", "数量", "C1,C4-C6", "47uF", "R2", "1K", "R3", "22K", "C2 C3", "47pF", "RX9", "1K"]
-def si(t): return f"<si><t>{t}</t></si>"
+# 日本語の Excel の見出しにはふりがな(<rPh>)が付く(「品番」が「品番ヒンバン」と読まれた。8.0.9-ja.5 の報告)
+FURIGANA = {"品番": "ヒンバン", "部品番号": "ブヒンバンゴウ"}
+def si(t):
+    if t in FURIGANA:
+        return f'<si><r><t>{t}</t></r><rPh sb="0" eb="{len(t)}"><t>{FURIGANA[t]}</t></rPh><phoneticPr fontId="1"/></si>'
+    return f"<si><t>{t}</t></si>"
 rows = [("部品番号", "値", "品番"), ("C1,C4-C6", "47uF", None), ("R2", "1K", None), ("R3", "22K", None), ("C2 C3", "47pF", None), ("RX9", "1K", None)]
 idx = {t: i for i, t in enumerate(ss)}
 sheet = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>']

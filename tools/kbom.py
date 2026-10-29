@@ -52,11 +52,22 @@ def _first_sheet(z):
     return target.lstrip("/") if target.startswith("/") else "xl/" + target
 
 
+def _text(si):
+    """The text of a string item (<si> or <is>): its own <t> and the <t> of its runs <r>, not
+    the furigana (<rPh>) that a Japanese Excel adds: 「品番」 read as 「品番ヒンバン」 and the
+    column was not found (reported on 8.0.9-ja.5)"""
+    t = "{%s}t" % NS["m"]
+    parts = [x.text or "" for x in si.findall(t)]
+    for r in si.findall("{%s}r" % NS["m"]):
+        parts += [x.text or "" for x in r.findall(t)]
+    return "".join(parts)
+
+
 def _shared(z):
     if "xl/sharedStrings.xml" not in z.namelist():
         return []
     root = ET.fromstring(z.read("xl/sharedStrings.xml"))
-    return ["".join(t.text or "" for t in si.iter("{%s}t" % NS["m"])) for si in root.findall("m:si", NS)]
+    return [_text(si) for si in root.findall("m:si", NS)]
 
 
 def read_rows(path):
@@ -86,7 +97,8 @@ def read_rows(path):
                 v = c.findtext("m:v", "", NS)
                 cells[col] = ss[int(v)] if v else ""
             elif t == "inlineStr":
-                cells[col] = "".join(x.text or "" for x in c.iter("{%s}t" % NS["m"]))
+                inline = c.find("m:is", NS)
+                cells[col] = _text(inline) if inline is not None else ""
             else:
                 cells[col] = c.findtext("m:v", "", NS) or ""
         rows.append((int(row.get("r")), cells))
