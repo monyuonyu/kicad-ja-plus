@@ -47,6 +47,10 @@ kicad-local: 改良した KiCad の道具をまとめた入口(保存形式は�
   kicad-local bom check <回路図|基板> [--bom 部品表.xlsx|.csv] [--json]
                                                 品番の末尾のリード間隔(村田 RDE の P1/K1、TDK FG)とフットプリントの間隔を照合。
                                                 --bom で部品表の品番も使い、部品表と回路図の部品の過不足・値の違いも出す
+                                                根拠の無い品番の挿入部品は「未確認」として出し、案件のフォルダの
+                                                データシート PDF から候補の行を示す(--strict で未確認も終了コード 1)
+  kicad-local bom record <品番> <間隔mm> --src "出典" [--dir 案件のフォルダ]
+                                                確かめた間隔を案件の記録(kbom_確認済み.toml)に。次の check から使う
   kicad-local bom update <回路図> <部品表.xlsx> [-o 出力.xlsx] [--dry-run]
                                                 部品表の値の列を回路図に合わせる(変わるセルだけ。書式はそのまま)
   kicad-local models <基板> [--json]           3D モデルの無い(ファイルが無い・指定が無い)部品の一覧。あれば終了コード 1

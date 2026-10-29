@@ -8,12 +8,17 @@ kbom: 部品表(BOM)と回路図・基板の照合(kicad-local bom。2026-10-29)
       食い違いがあれば終了コード 1
   kicad-local bom update <回路図> <部品表.xlsx> [-o 出力.xlsx] [--dry-run]
       部品表の値の列を回路図の値に合わせる(変わるセルだけ書き換え、ほかの中身・書式はそのまま)
+  kicad-local bom record <品番> <間隔 mm> --src "出典" [--dir 案件のフォルダ]
+      確かめたリード間隔を案件の記録(kbom_確認済み.toml)に残す。次の check から使う
 
-品番の規則は tools/bomrules.toml(メーカーの資料で確かめたものだけ。足すときは出典も書く)。
+リード間隔の根拠は、案件の記録 → tools/bomrules.toml の規則(メーカーの資料で確かめた系列だけ)の順。
+どちらにも無い品番で、フットプリントに間隔のある部品(挿入部品)は「未確認」として必ず出す(黙って通さない)。
+案件のフォルダ(または datasheets/・データシート/)にデータシートの PDF があれば、その品番の行と間隔の
+候補を頁つきで出す。確かめたら bom record で記録する(前もって規則を並べるのではなく、使った部品の分だけ)。
 部品表の列は見出しから探す: 部品番号(Reference・Ref・Designator・部品番号・記号)、品番(MPN・品番・型番・
 Part Number)、値(Value・値・定数)。1 行に「C1,C2,C5-C7」のように何個も書いてあってよい。
 """
-import argparse, csv, json, math, re, sys, tomllib, zipfile
+import argparse, csv, json, math, re, subprocess, sys, tomllib, zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -162,28 +167,94 @@ def part_number(fields):
     return next((fields[k].strip() for k in PN_FIELDS if fields.get(k, "").strip()), "")
 
 
+RECORD = "kbom_確認済み.toml"
+
+
+def load_records(folder):
+    """案件の記録 {品番: {"pitch", "src", "date"}}"""
+    path = Path(folder) / RECORD
+    if not path.exists():
+        return {}
+    return tomllib.loads(path.read_text(encoding="utf-8")).get("pitch", {})
+
+
+def record(folder, pn, pitch, src):
+    import datetime
+
+    path = Path(folder) / RECORD
+    recs = load_records(folder)
+    recs[pn] = {"pitch": float(pitch), "src": src, "date": datetime.date.today().isoformat()}
+    q = lambda t: '"' + str(t).replace("\\", "\\\\").replace('"', '\\"') + '"'  # noqa: E731
+    lines = ["# kicad-local bom record が書く: 確かめたリード間隔 [mm] と出典(手で直してもよい)", ""]
+    for k in sorted(recs):
+        r = recs[k]
+        lines += [f"[pitch.{q(k)}]", f"pitch = {float(r['pitch']):g}", f"src = {q(r.get('src', ''))}",
+                  f"date = {q(r.get('date', ''))}", ""]
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+_PDF_TEXT = {}
+
+
+def datasheet_hints(folder, pn, comp):
+    """データシートの PDF から、品番(か頭の 6 文字)と mm の数字のある行: [(ファイル, 頁, 行)]"""
+    files = []
+    ds = (comp.get("datasheet") or comp.get("fields", {}).get("Datasheet", "") or "").strip()
+    if ds and Path(ds).suffix.lower() == ".pdf" and Path(ds).exists():
+        files.append(Path(ds))
+    for sub in ("", "datasheets", "データシート"):
+        d = Path(folder) / sub
+        if d.is_dir():
+            files += sorted(d.glob("*.pdf"))
+    keys = [pn.upper(), pn.upper()[:6]]
+    out = []
+    for f in dict.fromkeys(files):
+        if f not in _PDF_TEXT:
+            r = subprocess.run(["pdftotext", "-layout", str(f), "-"], capture_output=True, text=True)
+            _PDF_TEXT[f] = r.stdout if r.returncode == 0 else ""
+        for page, text in enumerate(_PDF_TEXT[f].split("\f"), 1):
+            for line in text.splitlines():
+                u = line.upper()
+                if any(k and k in u for k in keys) and re.search(r"\d+(\.\d+)?\s*mm|(spacing|pitch|間隔|ピッチ)", line, re.I):
+                    out.append((f.name, page, " ".join(line.split())[:160]))
+                    if len(out) >= 4:
+                        return out
+    return out
+
+
 def check(design, bom_path=None):
     src = str(design)
+    folder = Path(src).resolve().parent
+    recs = load_records(folder)
     data = knetlist.from_pcb(src) if src.endswith(".kicad_pcb") else knetlist.from_sch(src)
     comps = {c["ref"]: c for c in data["components"] if not c["ref"].startswith("#")}
     measured = board_pitches(src) if src.endswith(".kicad_pcb") else {}
     bom = read_bom(bom_path) if bom_path else None
     rules = load_rules()
-    pitch, missing, extra, values = [], [], [], []
+    pitch, missing, extra, values, unconfirmed, no_pn = [], [], [], [], [], []
     for ref, c in sorted(comps.items(), key=lambda kv: (re.sub(r"\d", "", kv[0]), int(re.sub(r"\D", "", kv[0]) or 0))):
         pn = part_number(c.get("fields", {}))
         if bom and ref in bom["refs"] and bom["refs"][ref]["pn"]:
             pn = bom["refs"][ref]["pn"]
-        if not pn:
-            continue
-        got = pitch_of_pn(pn, rules)
-        if not got:
-            continue
-        want, rule, why = got
         have = pitch_of_footprint(c.get("footprint", ""))
         how = "フットプリントの名前"
         if ref in measured:
             have, how = measured[ref], "基板の穴の間隔"
+        if not pn:
+            if have is not None:
+                no_pn.append(ref)
+            continue
+        if pn in recs:
+            got = (float(recs[pn]["pitch"]), "案件の記録", recs[pn].get("src", ""))
+        else:
+            got = pitch_of_pn(pn, rules)
+        if not got:
+            if have is not None:   # 挿入部品: 間隔が合っているかを、まだ誰も確かめていない
+                unconfirmed.append({"ref": ref, "pn": pn, "footprint": c.get("footprint", ""), "fp_pitch": have,
+                                    "hints": datasheet_hints(folder, pn, c)})
+            continue
+        want, rule, why = got
         if have is None:
             pitch.append({"ref": ref, "pn": pn, "pn_pitch": want, "footprint": c.get("footprint", ""), "fp_pitch": None,
                           "ok": None, "rule": rule, "src": why, "note": "フットプリントの間隔が分からない"})
@@ -198,7 +269,8 @@ def check(design, bom_path=None):
         for ref, row in sorted(bom["refs"].items()):
             if ref in comps and row["value"] and _norm(row["value"]) != _norm(comps[ref]["value"]):
                 values.append({"ref": ref, "bom": row["value"], "design": comps[ref]["value"], "row": row["row"]})
-    return {"pitch": pitch, "bom_missing": missing, "bom_extra": extra, "values": values}
+    return {"pitch": pitch, "unconfirmed": unconfirmed, "no_part_number": no_pn, "bom_missing": missing, "bom_extra": extra, "values": values,
+            "record_file": str(folder / RECORD)}
 
 
 def _norm(v):
@@ -286,6 +358,12 @@ def main():
     c.add_argument("design")
     c.add_argument("--bom")
     c.add_argument("--json", action="store_true")
+    c.add_argument("--strict", action="store_true", help="未確認の部品があっても終了コード 1")
+    rc = sub.add_parser("record", help="確かめたリード間隔を案件の記録に残す")
+    rc.add_argument("pn")
+    rc.add_argument("pitch", type=float)
+    rc.add_argument("--src", required=True, help="出典(データシートの名前と頁など)")
+    rc.add_argument("--dir", default=".", help="案件のフォルダ(回路図・基板のあるところ。既定はいまの場所)")
     u = sub.add_parser("update", help="部品表の値の列を回路図に合わせる")
     u.add_argument("sch")
     u.add_argument("xlsx")
@@ -293,6 +371,10 @@ def main():
     u.add_argument("--dry-run", action="store_true")
     u.add_argument("--json", action="store_true")
     a = ap.parse_args()
+    if a.cmd == "record":
+        path = record(a.dir, a.pn, a.pitch, a.src)
+        print(f"記録した: {a.pn} = {a.pitch:g}mm({a.src})→ {path}")
+        return 0
     if a.cmd == "check":
         r = check(a.design, a.bom)
         bad = [p for p in r["pitch"] if p["ok"] is False]
@@ -304,13 +386,23 @@ def main():
                 mark = "NG" if p["ok"] is False else ("OK" if p["ok"] else "?")
                 print(f"  {mark} {p['ref']} {p['pn']}: 品番 {p['pn_pitch']:g}mm({p['rule']})"
                       f" / {p['note']} {p['fp_pitch'] if p['fp_pitch'] is not None else '—'}mm  {p['footprint']}")
+            if r["unconfirmed"]:
+                print(f"未確認 {len(r['unconfirmed'])} 部品(品番からリード間隔の根拠が取れない挿入部品。確かめたら bom record で記録):")
+                for u in r["unconfirmed"]:
+                    print(f"  ? {u['ref']} {u['pn']}: フットプリント {u['fp_pitch']:g}mm  {u['footprint']}")
+                    for f, page, line in u["hints"]:
+                        print(f"      候補 {f} p.{page}: {line}")
+            if r["no_part_number"]:
+                n = r["no_part_number"]
+                print(f"品番の無い挿入部品 {len(n)} 個(間隔を確かめられない。回路図の MPN 欄か --bom の部品表に品番を): "
+                      + ", ".join(n[:20]) + (" …" if len(n) > 20 else ""))
             if a.bom:
                 print(f"部品表に無い部品: {', '.join(r['bom_missing']) or 'なし'}")
                 print(f"回路図に無い部品(部品表にだけある): {', '.join(r['bom_extra']) or 'なし'}")
                 print(f"値の違い: {len(r['values'])} 件")
                 for v in r["values"]:
                     print(f"  {v['ref']}(行 {v['row']}): 部品表 {v['bom']} / 回路図 {v['design']}")
-        return 1 if bad or r["values"] or r["bom_missing"] or r["bom_extra"] else 0
+        return 1 if bad or r["values"] or r["bom_missing"] or r["bom_extra"] or (a.strict and r["unconfirmed"]) else 0
     r = update(a.sch, a.xlsx, a.output, a.dry_run)
     if a.json:
         print(json.dumps(r, ensure_ascii=False, indent=1))

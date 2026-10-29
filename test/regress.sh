@@ -127,6 +127,12 @@ chk "kicad-local pcb update-from-schematic(--dry-run は C3 の値だけ、書�
 # 部品表: 品番のリード間隔(C5 の RDE …P1 と C7 の FG18 は 2.5mm なのに 5.0mm の穴)と、部品表の値を回路図に合わせる
 mkdir -p now/bom && kicad-python tests/make_bom.py in.kicad_pcb now/bom > /dev/null 2>&1
 chk "kicad-local bom check(C5・C7 だけ間隔の食い違い、終了コード 1)" "kicad-local bom check now/bom/bom.kicad_pcb --json > now/bom/check.json 2>/dev/null; test \$? -eq 1 && python3 -c \"import json; d=json.load(open('now/bom/check.json')); assert sorted(p['ref'] for p in d['pitch'] if p['ok'] is False)==['C5','C7'] and sorted(p['ref'] for p in d['pitch'] if p['ok'])==['C4','C6'], d['pitch']\""
+# 根拠の無い品番: L1 に FOO123A。未確認として出し、データシートの行を候補に。bom record で記録すると OK に
+mkdir -p now/bom/datasheets && python3 tests/make_datasheet.py now/bom/datasheets/FOO.pdf && rm -f now/bom/kbom_確認済み.toml && kicad-python - now/bom/bom.kicad_pcb <<'PY' > /dev/null 2>&1
+import pcbnew, sys
+b = pcbnew.LoadBoard(sys.argv[1]); b.FindFootprintByReference("L1").SetField("MPN", "FOO123A"); b.Save(sys.argv[1])
+PY
+chk "kicad-local bom check の未確認(L1 FOO123A、データシートの行が候補)と bom record" "kicad-local bom check now/bom/bom.kicad_pcb --json 2>/dev/null > now/bom/unconf.json; python3 -c \"import json; d=json.load(open('now/bom/unconf.json')); u=[x for x in d['unconfirmed'] if x['ref']=='L1'][0]; assert any('FOO123A' in h[2] and '5.0 mm' in h[2] for h in u['hints']), u\" && kicad-local bom record FOO123A 5.0 --src 'FOO.pdf p.1' --dir now/bom && kicad-local bom check now/bom/bom.kicad_pcb --json 2>/dev/null > now/bom/rec.json; python3 -c \"import json; d=json.load(open('now/bom/rec.json')); assert not [x for x in d['unconfirmed'] if x['ref']=='L1'] and [p for p in d['pitch'] if p['ref']=='L1' and p['ok'] and p['rule']=='案件の記録'], d\""
 chk "kicad-local bom update(R3 の 22K だけ 10K に、ほかの中身はそのまま)" "kicad-local bom update sch/interf_u.kicad_sch now/bom/bom.xlsx -o now/bom/new.xlsx > now/bom/update.log 2>&1 && grep -q '行 4(R3): 22K → 10K' now/bom/update.log && kicad-local bom check sch/interf_u.kicad_sch --bom now/bom/new.xlsx 2>/dev/null | grep -q '値の違い: 0 件' && python3 -c \"import zipfile; a=zipfile.ZipFile('now/bom/bom.xlsx'); b=zipfile.ZipFile('now/bom/new.xlsx'); assert [n for n in a.namelist() if a.read(n)!=b.read(n)]==['xl/worksheets/sheet1.xml']\""
 
 # 入稿データ: デモの基板はドリルマーク「小さい印」と DRC の要確認があるので、確認で止まり(終了コード 1・zip なし)、
