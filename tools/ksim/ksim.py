@@ -93,6 +93,27 @@ def parse_tol(s, default):
 SKIP_LIBS = ("Connector", "Connector_Generic", "Mechanical", "MCU_Module", "power", "Graphic")
 
 
+PN_FIELDS = ("MPN", "品番", "型番", "Manufacturer_Part_Number", "Manufacturer Part Number", "MFR_PN", "PartNumber",
+             "Part Number", "P/N")
+
+
+def part_number(c):
+    """部品の品番(MPN・品番・型番などの欄。無ければ "")"""
+    f = c.get("fields", {})
+    return next((f[k].strip() for k in PN_FIELDS if f.get(k, "").strip()), "")
+
+
+def generic_value(c, val=None):
+    """値が記号の名前のまま(D_TVS・Q_NPN_ECB など): 値からは品物が分からない"""
+    val = c["value"] if val is None else val
+    kind = c["lib"].split(":")[-1]
+    return bool(val) and (val == kind or re.fullmatch(r'(D|Q|U|L|C|R)(_[A-Za-z0-9]+)+', val) is not None)
+
+
+# 電解コンデンサの tanδ(120Hz)の既定: 品番が表に無いとき、耐圧ごとの汎用品の代表値(一般品の規格の上限)
+TAND_BY_VOLTAGE = ((6.3, 0.22), (10, 0.19), (16, 0.16), (25, 0.14), (35, 0.12), (50, 0.10), (1e9, 0.08))
+
+
 class Builder:
     def __init__(self, comps, nets, spec):
         self.comps, self.nets, self.spec = comps, nets, spec
@@ -116,6 +137,9 @@ class Builder:
             self.node[name] = "0" if name in gnd else f"n{i}"
         self.par = load_parasitics(spec, comps)   # {ネット: (起点, {端子: (L nH, R mΩ, 長さ)})}
         self.par_used = {}
+        self.generic = {}       # 値が汎用名のまま、品番からもモデルが決まらなかった部品 {部品: (値, 品番)}
+        self.no_dcr = set()        # 巻線の抵抗が分からない L
+        self.assumed_esr = set()   # ESR を汎用品の代表値にした電解
 
     def padnode(self, net, ref, pin):
         """基板の寄生分を入れるネットでは、端子ごとに別のノード(起点の端子とは L・R でつなぐ)"""
@@ -176,8 +200,12 @@ class Builder:
             return line, "spec で直接指定"
         if "value" in over:   # 版の比較などで値だけ差し替える
             val = str(over["value"])
-        mapped = self.mapping.get(val) or self.mapping.get(c["fields"].get("MPN", ""))
+        pn = part_number(c)
+        # 品番が先: 値が汎用名(D_TVS)のとき、値の対応(6.8V の TVS)で別の品物(P6KE39A)を計算していた
+        mapped = (self.mapping.get(pn) if pn else None) or self.mapping.get(val)
         kind = lib.split(":")[1] if ":" in lib else lib
+        if generic_value(c, val) and not (pn and self.mapping.get(pn)) and kind not in ("R", "C", "L", "C_Polarized", "CP"):
+            self.generic[ref] = (val, pn)
         pins = sorted(c["pins"])
 
         # 対応表の "R:6.2±19%" のように、許容差をモデル側で指定できる
@@ -204,15 +232,20 @@ class Builder:
             v = parse_value(val)
             n = [self.pin(c, num=p) for p in pins[:2]]
             cv = jitter(v, 0.20)
-            esr = self.esr(c, cv)
+            esr, how = self.esr(c, cv)
             if esr:   # 電解コンデンサの ESR(tanδ から。esr_scale で倍率)
                 return (f"C{ref} {n[0]} {n[0]}_esr{ref} {cv:.6g}\nR{ref}_ESR {n[0]}_esr{ref} {n[1]} {esr:.6g}",
-                        f"{v:.4g}F、ESR {esr:.3g}Ω")
+                        f"{v:.4g}F、ESR {esr:.3g}Ω({how})")
             return f"C{ref} {n[0]} {n[1]} {cv:.6g}", f"{v:.4g}F"
         if kind == "L":
             v = parse_value(val)
             n = [self.pin(c, num=p) for p in pins[:2]]
-            return f"L{ref} {n[0]} {n[1]} {jitter(v, 0.20):.6g}", f"{v:.4g}H"
+            dcr = self.dcr(c, val)
+            if dcr:   # 巻線の抵抗(DCR 欄か値の「0.12Ω」)。無い L は入力の C と鳴きやすい
+                return (f"L{ref} {n[0]} {n[0]}_dcr{ref} {jitter(v, 0.20):.6g}\nR{ref}_DCR {n[0]}_dcr{ref} {n[1]} {dcr:.6g}",
+                        f"{v:.4g}H、DCR {dcr:.3g}Ω")
+            self.no_dcr.add(ref)
+            return f"L{ref} {n[0]} {n[1]} {jitter(v, 0.20):.6g}", f"{v:.4g}H(DCR なし)"
         if kind == "Fuse":
             if not mapped:
                 return None, f"ヒューズ {val} の抵抗値が未指定(models.map に \"R:値\")"
@@ -251,18 +284,33 @@ class Builder:
         return None, f"種類 {lib} の変換規則が無い(parts.{ref}.spice で直接指定できる)"
 
     def esr(self, c, cv):
-        """電解コンデンサの ESR: ratings.toml の tanδ(120Hz)から。[params] esr_scale で倍率(0 で理想)"""
+        """電解コンデンサの ESR: ratings.toml の tanδ(120Hz)から。品番が表に無ければ耐圧ごとの汎用品の
+        代表値(ESR の無い電解は L と鳴きやすい)。[params] esr_scale で倍率(0 で理想)。→ (ESR, 根拠)"""
         if c["lib"].split(":")[-1] not in ("C_Polarized", "CP"):
-            return None
+            return None, ""
         if not hasattr(self, "_caps"):
             self._caps = tomllib.loads((HERE / "models" / "ratings.toml").read_text(encoding="utf-8")).get("capacitor", {})
-        mpn = c["fields"].get("MPN", "")
-        d = next((d for k, d in self._caps.items() if k in mpn), None)
-        if not d:
-            return None
+        mpn = part_number(c)
+        d = next((d for k, d in self._caps.items() if mpn and k in mpn), None)
+        if d:
+            tand, how = d["tand"], f"tanδ {d['tand']:g}"
+        else:
+            m = re.search(r'/\s*([0-9.]+)\s*V', c["value"]) or re.search(r'([0-9.]+)\s*V', c["fields"].get("Voltage", ""))
+            volt = float(m.group(1)) if m else None
+            tand = next(t for v, t in TAND_BY_VOLTAGE if volt is not None and volt <= v) if volt else 0.20
+            how = f"tanδ {tand:g} は{'耐圧 ' + format(volt, 'g') + 'V の' if volt else '耐圧不明の'}汎用品の代表値"
+            self.assumed_esr.add(c["ref"])
         sc = self.spec.get("params", {}).get("esr_scale", 1.0)
         sc = sc["nominal"] if isinstance(sc, dict) else float(sc)
-        return d["tand"] / (2 * math.pi * 120 * cv) * sc if sc > 0 else None
+        return (tand / (2 * math.pi * 120 * cv) * sc, how) if sc > 0 else (None, "")
+
+    def dcr(self, c, val):
+        """コイルの巻線の抵抗 [Ω]: DCR 欄、または値の中の「0.12Ω」「120mΩ」。分からなければ None"""
+        text = c["fields"].get("DCR", "") or c["fields"].get("Rdc", "")
+        m = re.search(r'([0-9.]+\s*[mkµu]?)\s*(Ω|ohm)', text or val, re.I)
+        if m:
+            return parse_value(m.group(1))
+        return parse_value(text) if text else None
 
     def build(self, rng=None, tolerances=None, extra_lines=()):
         lines, skipped = [], {}
@@ -520,13 +568,15 @@ def load_ratings():
 
 def part_rating(c, rt):
     """部品 → 定格の辞書(src つき)。値・MPN・ratings.toml から"""
-    val, mpn = c["value"], c["fields"].get("MPN", "")
+    val, mpn = c["value"], part_number(c)
     kind = c["lib"].split(":")[-1]
     r = {}
-    for key, d in rt.get("rating", {}).items():
-        if key == val or (mpn and key in mpn):
-            r = dict(d)
-            break
+    # 品番が先(値が汎用名 D_TVS のとき、値の行で別の品物の定格になっていた)
+    hit = next((d for key, d in rt.get("rating", {}).items() if mpn and key in mpn), None)
+    if hit is None and not generic_value(c):
+        hit = next((d for key, d in rt.get("rating", {}).items() if key == val), None)
+    if hit is not None:
+        r = dict(hit)
     if kind == "R":
         for key, d in rt.get("resistor", {}).items():
             if key in mpn:
@@ -988,7 +1038,8 @@ def cmd_run(args):
             md += ["", f"ほかに {small} 項目は使用率 1% 未満(全項目は `定格チェック.csv`)。"]
         md += [""] + [f"[{i + 1}] {t}  " for i, t in enumerate(srcs)]
         if unknown:
-            md += ["", "定格が分からず判定できなかったもの(models/ratings.toml か回路図の欄に足すと判定する): "
+            md += ["", f"**未判定 {len(unknown)} 部品**(定格が分からず判定できなかった。NG 0 でもこれらは確かめていない。"
+                   "models/ratings.toml か回路図の欄(MPN・品番)に足すと判定する): "
                    + "、".join(f"{r}({comps[r]['value']}: {'・'.join(sorted(n))})" for r, n in sorted(unknown.items()))]
         allok &= not any(t[7] == "NG" for t in srows)
         with open(out / "定格チェック.csv", "w", newline="", encoding="utf-8") as f:
@@ -996,6 +1047,9 @@ def cmd_run(args):
             w.writerow(["部品", "値", "項目", "使用値", "単位", "定格", "使用率", "判定", "出典", "最悪の条件"])
             for t in srows:
                 w.writerow(t)
+    notes = model_notes(b)
+    if notes:
+        md += ["", "## モデルの前提(確かめてほしいもの)", ""] + [f"- {t}" for t in notes]
     md += ["", "## 波形", ""] + [f"![]({p.name})" for p in plots]
     md += ["", "## シミュレーションから外した部品", ""]
     for r, why in sorted(skipped.items()):
@@ -1026,11 +1080,32 @@ def cmd_run(args):
         print(f"  [{name}] " + " / ".join(f"{k} {fmt(r[k], unit[k])}" for k in r))
     if srows:
         bad = [t for t in srows if t[7] in ("NG", "注意")]
-        print(f"  部品の定格: {len(srows)} 項目を確認、NG {sum(t[7] == 'NG' for t in srows)}・注意 {sum(t[7] == '注意' for t in srows)}")
+        print(f"  部品の定格: {len(srows)} 項目を確認、NG {sum(t[7] == 'NG' for t in srows)}・注意 {sum(t[7] == '注意' for t in srows)}"
+              f"・未判定 {len(unknown)} 部品")
         for ref, val, name, u, unit_, rating, use, judge, _, cond in bad[:10]:
             print(f"    {judge} {ref}({val}) {name} {fmt(u, unit_)} / 定格 {fmt(rating, unit_)} = {use * 100:.0f}%(最悪: {cond})")
+        if unknown:
+            print("    未判定(定格が分からない): " + "、".join(f"{r}({comps[r]['value']})" for r in sorted(unknown)))
+    for t in model_notes(b):
+        print(f"  注意: {t}")
     print(f"判定: {'OK' if allok else 'NG あり'}  → {out / '結果.md'}")
     return 0 if allok else 1
+
+
+def model_notes(b):
+    """モデルの前提で、結果を信じる前に確かめてほしいもの"""
+    out = []
+    if b.generic:
+        out.append("値が記号の名前のまま(品番からもモデルが決まらない): " + "、".join(
+            f"{r}({v}{'、品番 ' + pn if pn else '、品番なし'})" for r, (v, pn) in sorted(b.generic.items()))
+            + "。対応表の汎用のモデルで計算した(別の品物の値かもしれない)。回路図の値か MPN 欄に品番を")
+    if b.no_dcr:
+        out.append("巻線の抵抗(DCR)が分からないコイル: " + "、".join(sorted(b.no_dcr))
+                   + "。抵抗 0 の L は C と鳴き続ける(DCR 欄か値に「0.12Ω」を)")
+    if b.assumed_esr:
+        out.append("ESR を汎用品の代表値(耐圧ごとの tanδ)にした電解: " + "、".join(sorted(b.assumed_esr))
+                   + "(品番を models/ratings.toml の [capacitor] に足すとその値)")
+    return out
 
 
 def describe_analysis(an):

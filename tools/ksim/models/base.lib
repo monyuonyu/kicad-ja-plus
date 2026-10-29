@@ -17,13 +17,25 @@
 
 * ---- DCDC モジュール(振る舞いモデルの例) ---------------------------------------
 * 出力電圧は入力が足りる間は一定、足りなければ入力-ドロップ分に下がる。入力電流は電力から逆算(効率一定)。
-* 過電流・短絡保護・起動時間はモデル化していない。値は汎用の 5V 出力品を想定した例。
-.subckt DCDC5 in gnd out
-Bv mid gnd V = min(5, max(V(in,gnd)-1.5, 0))
+* 鳴かないように(前の版は無負荷でも出力が 1〜5V を往復することがあった、2026-10-29 の報告):
+*   - 入力を見て決める出力の目標は、入力に 50µs 遅れて追う(入力と出力が同じ瞬間に決まり合うと、入力側の L・C と鳴く)
+*   - 入力が uvlo を超えたら tss で立ち上げ、uvlo-0.7V を下回ったら止める(履歴つき)。入力が 0 に近いときは電流を引かない
+*   - 入力のコンデンサは 4.7µF＋ESR 0.1Ω、出力の直列抵抗 30mΩ
+* 過電流・短絡保護はモデル化していない。値は汎用の 5V 出力品を想定した例(X1 ... DCDC5 vout=12 drop=2 のように変えられる)。
+* 入力の前の L に抵抗(DCR)が無いと、L と C だけで鳴き続ける(実物では DCR と配線の抵抗で収まる)。
+.subckt DCDC5 in gnd out params: vout=5 drop=1.5 eff=0.94 tss=1m uvlo=4.5
+Bsense s gnd V = V(in,gnd)
+Rsf s fs 1k
+Csf fs gnd 50n
+Bon on gnd V = V(fs,gnd) > {uvlo}-0.7*V(ss,gnd) ? 1 : 0
+Rss on ss 1k
+Css ss gnd {tss/1k}
+Bv mid gnd V = min({vout}*V(ss,gnd), max(V(fs,gnd)-{drop}, 0))
 Vs mid o2 0
 Ro o2 out 0.03
-Bi in gnd I = V(out,gnd)*I(Vs)/(0.94*max(V(in,gnd),1))
-Cin in gnd 1u
+Bi in gnd I = V(out,gnd)*max(I(Vs),0)/({eff}*max(V(in,gnd),{uvlo}))*min(max(V(in,gnd),0)/{uvlo},1)
+Cin in cesr 4.7u
+Resr cesr gnd 0.1
 .ends DCDC5
 
 * ---- 一般的な LED -------------------------------------------------------------
