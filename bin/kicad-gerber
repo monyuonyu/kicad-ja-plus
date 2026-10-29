@@ -8,4 +8,20 @@ KICAD_LOCAL_BUILD=${KICAD_LOCAL_BUILD:-$HOME/src/build-10.0.6}
 export KICAD_LOCAL_HOME KICAD_LOCAL_BUILD
 # 文字コードが UTF-8 でない環境（LANG が無い docker など）では、日本語の文字列を扱うところで落ちる（kicad_route ほか）ので UTF-8 に
 case "$(locale charmap 2>/dev/null)" in UTF-8) ;; *) export LC_ALL=C.UTF-8 ;; esac
+# dirdiff は入稿の zip もそのまま比べられるように(一時フォルダに展開して渡す)
+if [ "$1" = "dirdiff" ]; then
+  args=(); tmp=""
+  for a in "$@"; do
+    if [[ "$a" == *.zip || "$a" == *.ZIP ]] && [ -f "$a" ]; then
+      [ -n "$tmp" ] || { tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT; }
+      d="$tmp/$(basename "${a%.*}")_$RANDOM"; mkdir -p "$d"
+      python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$a" "$d" || exit 2
+      args+=("$d")
+    else
+      args+=("$a")
+    fi
+  done
+  "$KICAD_LOCAL_BUILD/gerbview/kicad_gerber" "${args[@]}"
+  exit $?
+fi
 exec "$KICAD_LOCAL_BUILD/gerbview/kicad_gerber" "$@"

@@ -66,7 +66,8 @@ def eff(hide=False, justify=None):
 class Sch:
     def __init__(self, path):
         self.path = Path(path)
-        self.root = sx.parse(self.path.read_text(encoding="utf-8"))
+        # 変えた所だけ書き換える(全体を書き直すと値 1 つで数千行の差分になり、CRLF も LF になった)
+        self.root, self.keep = sx.read_keep(self.path)
         self.uuid = sx.one(self.root, "uuid")[1]
         self.project = self.path.stem
         self.log = []      # 指示書(画面で同じことをする手順)
@@ -562,7 +563,7 @@ class Sch:
                 self.place_fields(s)
 
     def save(self, out):
-        Path(out).write_text(sx.dump(self.root) + "\n", encoding="utf-8")
+        sx.write_keep(out, self.root, self.keep)
 
 
 def load_nets(sch):

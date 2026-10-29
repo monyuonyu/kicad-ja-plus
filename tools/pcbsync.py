@@ -285,6 +285,15 @@ def main():
         rc = 0
     else:
         pcbnew.SaveBoard(a.out, b)
+        # 元の基板が CRLF なら CRLF のまま(KiCad の保存は LF。改行コードの違いで全行が差分になった)
+        with open(a.pcb, "rb") as f:
+            crlf = b"\r\n" in f.read(65536)
+        if crlf:
+            with open(a.out, "rb") as f:
+                data = f.read()
+            if b"\r\n" not in data:
+                with open(a.out, "wb") as f:
+                    f.write(data.replace(b"\n", b"\r\n"))
         # 照合: 書いた基板を回路図ともう一度比べる(DRC の --schematic-parity と同じ観点。残りがあれば終了コード 1)
         rep["parity"] = parity(a.sch, a.out, b)
         rep["drc_parity"] = None if a.no_drc else drc_parity(a.sch, a.out, Path(a.pcb).with_suffix(".kicad_pro"))

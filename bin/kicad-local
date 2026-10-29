@@ -87,6 +87,8 @@ kicad-local: 改良した KiCad の道具をまとめた入口(保存形式は�
                                                 両方の製造データ(ガーバー・ドリル。基板の出力設定)を
                                                 層ごとに比べ、差分画像と場所の一覧を出す
                                                 (灰=共通 / 赤=消えた / 緑=増えた / 青枠=差のある場所)
+  kicad-gerber dirdiff <旧フォルダ|旧.zip> <新フォルダ|新.zip> --out <出力フォルダ>
+                                                製造データ(入稿の zip のままでも)どうしを層ごとに。ドリルは増えた・消えた穴の座標
   kicad-local renderdiff <基板A> <基板B> [top|bottom] [出力.png]
                                                 3D 画像を並べ、変わった所に色を付けた画像を出す
   kicad-local gerber info|diff|dirdiff ...      ガーバー/ドリル単体の情報・差分
