@@ -124,6 +124,11 @@ chk "kicad-local netlist --json(回路図: BUS1 の 1 番は GND・名前 GND、
 mkdir -p now/pic && cp pic/*.kicad_sch in.kicad_pcb in.kicad_pro now/pic/ && sed -i 's|(property "Value" "22uF/25V"|(property "Value" "47uF/25V"|' now/pic/in.kicad_sch
 chk "kicad-local pcb update-from-schematic(--dry-run は C3 の値だけ、書いた基板は照合で一致)" "kicad-local pcb update-from-schematic --dry-run --json now/pic/in.kicad_pcb > now/pic/dry.json && kicad-cli-local pcb update-from-schematic -o now/pic/out.kicad_pcb --json now/pic/in.kicad_pcb > now/pic/sync.json && python3 -c \"import json; d=json.load(open('now/pic/dry.json')); s=json.load(open('now/pic/sync.json')); assert d['values']==[{'ref':'C3','old':'22uF/25V','new':'47uF/25V'}] and not d['pad_nets'] and not d['redo_nets'] and not d['added'], d; assert s['parity']==[] and s['drc_parity']==[], s\" && grep -q '47uF/25V' now/pic/out.kicad_pcb"
 
+# 部品表: 品番のリード間隔(C5 の RDE …P1 と C7 の FG18 は 2.5mm なのに 5.0mm の穴)と、部品表の値を回路図に合わせる
+mkdir -p now/bom && kicad-python tests/make_bom.py in.kicad_pcb now/bom > /dev/null 2>&1
+chk "kicad-local bom check(C5・C7 だけ間隔の食い違い、終了コード 1)" "kicad-local bom check now/bom/bom.kicad_pcb --json > now/bom/check.json 2>/dev/null; test \$? -eq 1 && python3 -c \"import json; d=json.load(open('now/bom/check.json')); assert sorted(p['ref'] for p in d['pitch'] if p['ok'] is False)==['C5','C7'] and sorted(p['ref'] for p in d['pitch'] if p['ok'])==['C4','C6'], d['pitch']\""
+chk "kicad-local bom update(R3 の 22K だけ 10K に、ほかの中身はそのまま)" "kicad-local bom update sch/interf_u.kicad_sch now/bom/bom.xlsx -o now/bom/new.xlsx > now/bom/update.log 2>&1 && grep -q '行 4(R3): 22K → 10K' now/bom/update.log && kicad-local bom check sch/interf_u.kicad_sch --bom now/bom/new.xlsx 2>/dev/null | grep -q '値の違い: 0 件' && python3 -c \"import zipfile; a=zipfile.ZipFile('now/bom/bom.xlsx'); b=zipfile.ZipFile('now/bom/new.xlsx'); assert [n for n in a.namelist() if a.read(n)!=b.read(n)]==['xl/worksheets/sheet1.xml']\""
+
 # 終了コード: 配線の比較か道具の確認に NG が 1 つでもあれば 1（自動の試験が失敗を見逃さないように）
 if [ "$route_rc" -ne 0 ] || [ "$fails" -ne 0 ]; then
   echo "NG あり（配線の比較: $([ "$route_rc" -eq 0 ] && echo OK || echo NG)、道具の確認の NG: $fails 件）"
