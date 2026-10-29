@@ -225,8 +225,14 @@ def datasheet_hints(folder, pn, comp):
     out = []
     for f in dict.fromkeys(files):
         if f not in _PDF_TEXT:
-            r = subprocess.run(["pdftotext", "-layout", str(f), "-"], capture_output=True, text=True)
-            _PDF_TEXT[f] = r.stdout if r.returncode == 0 else ""
+            try:
+                r = subprocess.run(["pdftotext", "-layout", str(f), "-"], capture_output=True, text=True)
+                _PDF_TEXT[f] = r.stdout if r.returncode == 0 else ""
+            except FileNotFoundError:   # poppler-utils が無い: 候補は出せないが、照合は続ける
+                if not _PDF_TEXT.get("_warned"):
+                    print("注意: pdftotext が無いので、データシートから候補を出せない(poppler-utils を入れる)", file=sys.stderr)
+                    _PDF_TEXT["_warned"] = True
+                _PDF_TEXT[f] = ""
         for page, text in enumerate(_PDF_TEXT[f].split("\f"), 1):
             for line in text.splitlines():
                 u = line.upper()
