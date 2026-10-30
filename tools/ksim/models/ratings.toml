@@ -18,6 +18,21 @@ src = "東芝 2SC1815 データシート"
 p = 0.5
 src = "1N52xxB シリーズ: 500mW(DO-35)"
 
+[rating."MTP4835I3"]
+vds = 30
+vgs = 25
+id = 10
+p = 2.5
+src = "CYStech MTP4835I3(Spec. No. C830I3, 2018-07-27): VDS -30V、VGS ±25V、ID -10A・PD 2.5W(TA=25℃)"
+
+[rating."P4KE6.8A"]
+ppk = 400
+src = "P4KE シリーズ: 400W(10/1000µs)。定常の損失はメーカーで 1.0〜1.5W と違い、確かめていないので入れない"
+
+[rating."SA30A"]
+ppk = 500
+src = "Littelfuse SA シリーズ: 500W(10/1000µs)。定常の損失は確かめていないので入れない"
+
 # 書き方の例(自分の部品はデータシートで確かめてから足す):
 # [rating."PTC-例"]            i = 0.05   v = 60           # 保持電流と最高電圧
 # [rating."FUSE-2A-例"]        i = 2.0    derate = 0.75
