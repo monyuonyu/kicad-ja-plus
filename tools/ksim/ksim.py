@@ -22,6 +22,13 @@ sys.path.insert(0, str(HERE))
 MODELS = Path(os.path.expanduser(os.environ["KSIM_MODELS"])).resolve() if os.environ.get("KSIM_MODELS") else HERE / "models"
 import ngs  # noqa: E402
 
+
+def _trapz(y, x):
+    """台形の積分: numpy 2 は trapezoid、1.x(Ubuntu 24.04 の 1.26)は trapz だけ(定格チェックで止まった)"""
+    import numpy as np
+
+    return (getattr(np, "trapezoid", None) or np.trapz)(y, x)
+
 # ---------------------------------------------------------------- ネットリスト
 
 def export_netlist(sch):
@@ -94,6 +101,8 @@ def parse_tol(s, default):
 # ---------------------------------------------------------------- 回路の組み立て
 
 SKIP_LIBS = ("Connector", "Connector_Generic", "Mechanical", "MCU_Module", "power", "Graphic")
+# 部品番号でもコネクタ・テストピン・取付穴とみなす(自前の記号のライブラリでは上で分からない)
+SKIP_REF = re.compile(r"^(J|JP|P|CN|CON|TP|MH|H)\d")
 
 
 PN_FIELDS = ("MPN", "品番", "型番", "Manufacturer_Part_Number", "Manufacturer Part Number", "MFR_PN", "PartNumber",
@@ -202,7 +211,7 @@ class Builder:
         ref, val, lib = c["ref"], c["value"], c["lib"]
         if any(fnmatch.fnmatch(ref, p) for p in self.exclude):
             return None, "除外(spec の exclude)"
-        if lib.split(":")[0] in SKIP_LIBS or "TestPoint" in lib or "MountingHole" in lib:
+        if lib.split(":")[0] in SKIP_LIBS or "TestPoint" in lib or "MountingHole" in lib or SKIP_REF.match(ref):
             return None, "コネクタ・マイコン・機構部品のため除外"
         over = self.params.get(ref, {})
         if isinstance(over, str):
@@ -324,6 +333,66 @@ class Builder:
             return parse_value(m.group(1))
         return parse_value(text) if text else None
 
+    def provenance(self, c):
+        """どのモデルを、どこから使ったか(計算の前に一覧にする。黙って代用しない):
+        {"model", "how", "file", "ok", "why"}。モデルの要らない部品(R・C・L・外す部品)は None"""
+        ref, val, lib = c["ref"], c["value"], c["lib"]
+        if any(fnmatch.fnmatch(ref, p) for p in self.exclude):
+            return None
+        if lib.split(":")[0] in SKIP_LIBS or "TestPoint" in lib or "MountingHole" in lib or SKIP_REF.match(ref):
+            return None
+        over = self.params.get(ref, {})
+        if isinstance(over, str):
+            over = {"spice": over}
+        if "spice" in over:
+            return {"model": "(直接の SPICE 行)", "how": "手順の parts の直接指定", "file": "", "ok": True, "why": ""}
+        if "value" in over:
+            val = str(over["value"])
+        kind = lib.split(":")[1] if ":" in lib else lib
+        pn = part_number(c)
+        by_pn = self.mapping.get(pn) if pn else None
+        by_val = self.mapping.get(val)
+        if kind in ("R", "C", "L", "C_Polarized", "CP") and not (by_pn or by_val or "").startswith("R:"):
+            return None   # 値から作る(ESR・DCR の前提は「モデルの前提」に)
+        if kind.startswith("SW_"):
+            state = over.get("state")
+            return {"model": "抵抗(%s)" % (state or "開"), "how": "手順の parts の state" if state else "既定(開)",
+                    "file": "", "ok": bool(state), "why": "" if state else "スイッチの状態を決めていない(既定の「開」で計算)"}
+        model = by_pn or by_val
+        if not model:
+            return {"model": "", "how": "モデル無し", "file": "", "ok": False,
+                    "why": "対応表に品番も値も無い(シミュレーションから外した)"}
+        name = model.split("(")[0].split("±")[0]
+        name = name[2:] if name.startswith(("X:", "R:")) else name
+        where = self.model_file(name)
+        if by_pn:
+            how, ok, why = "対応表(品番 %s)" % pn, True, ""
+        elif generic_value(c, val):
+            how, ok, why = "対応表(値 %s)" % val, False, "値が記号の名前のまま(%s)。品番%sで当たらず、汎用のモデル" % (val, " " + pn if pn else "が無い")
+        else:
+            how, ok, why = "対応表(値 %s)" % val, bool(not pn), ("品番 %s では当たらず、値で当てた" % pn) if pn else ""
+        if where.startswith("vendor"):
+            how += "・メーカー配布"
+        return {"model": model, "how": how, "file": where, "ok": ok, "why": why}
+
+    def model_file(self, name):
+        """モデル名を定義しているファイル(include の中から。vendor/ はメーカー配布)"""
+        if not hasattr(self, "_defs"):
+            self._defs = {}
+            for x in self.spec.get("models", {}).get("include", ["models/base.lib"]):
+                try:
+                    f = resolve(self.spec, x)
+                    text = Path(f).read_text(encoding="utf-8", errors="replace")
+                except (SystemExit, OSError):
+                    continue
+                tag = ("vendor/" if "vendor" in Path(f).parts else "") + Path(f).name
+                for m in re.finditer(r'^\s*\.(?:model|subckt)\s+(\S+)', text, re.M | re.I):
+                    self._defs.setdefault(m.group(1).upper(), tag)
+        return self._defs.get(name.upper(), "")
+
+    def provenance_all(self):
+        return {r: p for r in sorted(self.comps) if (p := self.provenance(self.comps[r])) is not None}
+
     def build(self, rng=None, tolerances=None, extra_lines=()):
         lines, skipped = [], {}
         self.emitted = {}   # 部品番号 → [素子名, ノード..., 値](定格チェック用。spec で直接書いた部品は除く)
@@ -433,19 +502,19 @@ def measure(t, y, kind, at=None, window=None):
     if kind == "min":
         return float(y.min())
     if kind == "avg":
-        return float(np.trapezoid(y, t) / (t[-1] - t[0])) if len(t) > 1 else float(y[0])
+        return float(_trapz(y, t) / (t[-1] - t[0])) if len(t) > 1 else float(y[0])
     if kind == "final":
         return float(y[-1])
     if kind == "pp":
         return float(y.max() - y.min())
     if kind == "integral":   # 例: 電流を積分して電荷
-        return float(np.trapezoid(y, t))
+        return float(_trapz(y, t))
     if kind == "integral_pos":   # 正の向きだけ積分
-        return float(np.trapezoid(np.clip(y, 0, None), t))
+        return float(_trapz(np.clip(y, 0, None), t))
     if kind == "integral_abs":   # 向きを問わず積分(振動の行き来も数える)
-        return float(np.trapezoid(np.abs(y), t))
+        return float(_trapz(np.abs(y), t))
     if kind == "i2t":        # 電流の 2 乗の積分(ヒューズの溶断の目安 A²s)
-        return float(np.trapezoid(y * y, t))
+        return float(_trapz(y * y, t))
     if kind == "cross":      # 初めて at の値を超えた時刻(立ち上がり時間など)
         idx = np.nonzero(y >= at)[0]
         return float(t[idx[0]]) if len(idx) else float("nan")
@@ -515,7 +584,7 @@ def stress_collect(b, spec):
             return float(y)
         y = w(y)
         if xw is not None and len(xw) > 1:
-            return float(np.trapezoid(y, xw) / (xw[-1] - xw[0]))
+            return float(_trapz(y, xw) / (xw[-1] - xw[0]))
         return float(np.max(y))
 
     def rms(y):
@@ -523,7 +592,7 @@ def stress_collect(b, spec):
             return abs(float(y))
         y = w(y)
         if xw is not None and len(xw) > 1:
-            return float(np.sqrt(np.trapezoid(y * y, xw) / (xw[-1] - xw[0])))
+            return float(np.sqrt(_trapz(y * y, xw) / (xw[-1] - xw[0])))
         return absmax(y)
 
     out = {}
@@ -556,7 +625,7 @@ def stress_collect(b, spec):
             out[(ref, "P")] = avg(p)
             out[(ref, "Ppk")] = absmax(p)
             if x is not None and len(x) > 1:
-                out[(ref, "E")] = float(np.trapezoid(np.clip(p, 0, None), x))
+                out[(ref, "E")] = float(_trapz(np.clip(p, 0, None), x))
         elif L == "Q":
             vc, vb, ve = v(nodes[0]), v(nodes[1]), v(nodes[2])
             ic, ib = g(f"@{name.lower()}[ic]"), g(f"@{name.lower()}[ib]")
@@ -579,6 +648,20 @@ def stress_collect(b, spec):
 
 def load_ratings():
     return tomllib.loads((MODELS / "ratings.toml").read_text(encoding="utf-8"))
+
+
+def rating_match(c, rt):
+    """定格の表にどう当たったか: "品番" / "品番の一部 <鍵>" / "値" / None"""
+    val, mpn = c["value"], part_number(c)
+    for key in rt.get("rating", {}):
+        if mpn and key == mpn:
+            return "品番"
+    for key in rt.get("rating", {}):
+        if mpn and key in mpn:
+            return "品番の一部 " + key
+    if not generic_value(c) and val in rt.get("rating", {}):
+        return "値"
+    return None
 
 
 def part_rating(c, rt):
@@ -927,6 +1010,17 @@ def cmd_run(args):
     b = Builder(comps, nets, spec)
     out = Path(args.out or (spec["_dir"] / f"ksim_{Path(args.spec).stem}"))
     out.mkdir(parents=True, exist_ok=True)
+    # 計算の前に: どの部品にどのモデルを、どこから(黙って代用しない。汎用・値で当てた・無しは未確認)
+    prov = b.provenance_all()
+    unconf = {r: p for r, p in prov.items() if not p["ok"]}
+    print(f"モデルの出どころ: {len(prov)} 部品(未確認 {len(unconf)})")
+    for r, p in prov.items():
+        mark = "  " if p["ok"] else "? "
+        print(f"  {mark}{r}({comps[r]['value']}): {p['model'] or '—'}  ← {p['how']}"
+              + (f" [{p['file']}]" if p["file"] else "") + (f"  未確認: {p['why']}" if not p["ok"] else ""))
+    if unconf and getattr(args, "strict", False):
+        print(f"--strict: モデルが未確認の部品が {len(unconf)} 個あるので止める(手順の parts か models の map で決める)", file=sys.stderr)
+        return 1
 
     tols = {}
     x, sig, res, skipped, errs = run_once(b, spec, None, tols, keep=out / "circuit.cir")
@@ -992,6 +1086,14 @@ def cmd_run(args):
           "(データシートの値に当てはめたもの。根拠は models/base.lib の注記)", ""]
     if spec.get("note"):
         md += [spec["note"], ""]
+    md += ["## モデルの出どころ", "",
+           f"{len(prov)} 部品のうち **未確認 {len(unconf)}**(汎用のモデル・値で当てた・モデル無し・状態を決めていないスイッチ)。"
+           "未確認の部品の結果は、別の品物として計算されているかもしれない。", "",
+           "| 部品 | 値 | モデル | 出どころ | 未確認の理由 |", "|---|---|---|---|---|"]
+    for r, p in prov.items():
+        md.append(f"| {r} | {comps[r]['value']} | {p['model'] or '—'} | {p['how']}{' [' + p['file'] + ']' if p['file'] else ''} | "
+                  f"{'**' + p['why'] + '**' if not p['ok'] else ''} |")
+    md += [""]
     md += ["## 測定値", "", "| 項目 | 公称 | " + ("最小 | 最大 | 平均 | " if mc else "") + "判定 |",
            "|---|---:|" + ("---:|---:|---:|" if mc else "") + "---|"]
     allok = True
@@ -1041,9 +1143,15 @@ def cmd_run(args):
             w.writerow(["条件"] + list(res))
             for lab, r in crows:
                 w.writerow([lab] + [r[k] for k in res])
-    srows = []
+    srows, unknown, partial, rated = [], {}, {}, set()
     if stress_runs:
         srows, unknown, der = stress_table(comps, stress_worst(stress_runs), spec)
+        rt_all = load_ratings()
+        for ref in {t[0] for t in srows}:
+            how = rating_match(comps[ref], rt_all)
+            if how and how.startswith("品番の一部"):
+                partial[ref] = how
+        rated = {t[0] for t in srows if t[5]} - set(partial)
         kind = spec.get("stress", {}).get("kind", "steady")
         md += ["", "## 部品の定格チェック", "",
                f"使用値は{'公称とばらつき ' + str(runs) + ' 回の' if runs else '公称の'}最悪値。"
@@ -1071,6 +1179,12 @@ def cmd_run(args):
                    "models/ratings.toml か回路図の欄(MPN・品番)に足すと判定する): "
                    + "、".join(f"{r}({comps[r]['value']}: {'・'.join(sorted(n))})" for r, n in sorted(unknown.items()))]
         allok &= not any(t[7] == "NG" for t in srows)
+        if partial:
+            md += ["", "**品番の一部で定格の表に当てた部品**(別の品物の定格かもしれない): "
+                   + "、".join(f"{r}({how})" for r, how in sorted(partial.items()))]
+        if not rated:   # 1 部品も確かめていないのに「NG 0」で合格に見えた
+            allok = False
+            md += ["", "**定格を確かめられた部品が 0 個**: 定格の判定はできていない(合格ではない)"]
         with open(out / "定格チェック.csv", "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
             w.writerow(["部品", "値", "項目", "使用値", "単位", "定格", "使用率", "判定", "出典", "最悪の条件"])
@@ -1114,11 +1228,24 @@ def cmd_run(args):
         for ref, val, name, u, unit_, rating, use, judge, _, cond in bad[:10]:
             print(f"    {judge} {ref}({val}) {name} {fmt(u, unit_)} / 定格 {fmt(rating, unit_)} = {use * 100:.0f}%(最悪: {cond})")
         if unknown:
-            print("    未判定(定格が分からない): " + "、".join(f"{r}({comps[r]['value']})" for r in sorted(unknown)))
+            print("    定格未確認(表に無い): " + "、".join(f"{r}({comps[r]['value']})" for r in sorted(unknown)))
+        if partial:
+            print("    品番の一部で当てた: " + "、".join(f"{r}({h})" for r, h in sorted(partial.items())))
+        if not rated:
+            print("    定格を確かめられた部品が 0 個: 定格の判定はできていない(合格ではない)")
     for t in model_notes(b):
         print(f"  注意: {t}")
-    print(f"判定: {'OK' if allok else 'NG あり'}  → {out / '結果.md'}")
-    return 0 if allok else 1
+    if unconf:
+        print(f"  未確認のモデル {len(unconf)} 部品: " + "、".join(sorted(unconf)) + "(結果.md の「モデルの出どころ」)")
+    strict_fail = getattr(args, "strict", False) and (unconf or unknown or partial)
+    if strict_fail:
+        print("--strict: 未確認(モデル・定格)があるので NG にする", file=sys.stderr)
+    pending = [f"モデル未確認 {len(unconf)} 部品"] if unconf else []
+    pending += [f"定格未確認 {len(unknown)} 部品"] if unknown else []
+    print(f"判定: {'OK' if allok and not strict_fail else 'NG あり(または未判定)'}"
+          + (f"(確かめた範囲で。{'・'.join(pending)})" if pending and allok and not strict_fail else
+             (f"({'・'.join(pending)})" if pending else "")) + f"  → {out / '結果.md'}")
+    return 0 if allok and not strict_fail else 1
 
 
 def model_notes(b):
@@ -1158,7 +1285,9 @@ def cmd_parts(args):
     b = Builder(comps, nets, spec)
     for ref in sorted(comps):
         line, why = b.element(comps[ref])
-        print(f"{ref:10s} {comps[ref]['value'][:22]:22s} " + (f"→ {line}" if line else f"× {why}"))
+        p = b.provenance(comps[ref])
+        tag = "" if p is None else (f"  [{p['how']}{' ' + p['file'] if p['file'] else ''}]" + ("" if p["ok"] else f" 未確認: {p['why']}"))
+        print(f"{ref:10s} {comps[ref]['value'][:22]:22s} " + (f"→ {line}" if line else f"× {why}") + tag)
 
 
 def main():
@@ -1166,6 +1295,7 @@ def main():
     sp = ap.add_subparsers(dest="cmd", required=True)
     r = sp.add_parser("run"); r.add_argument("spec"); r.add_argument("--out"); r.add_argument("--runs", type=int)
     r.add_argument("--sch", help="手順ファイルの schematic の代わりにこの回路図で回す(版を比べるとき)")
+    r.add_argument("--strict", action="store_true", help="モデルや定格が未確認の部品があれば NG(終了コード 1)。計算の前にモデルが未確認なら止める")
     n = sp.add_parser("nets"); n.add_argument("sch")
     p = sp.add_parser("parts"); p.add_argument("--spec"); p.add_argument("--sch")
     a = ap.parse_args()

@@ -151,6 +151,9 @@ chk "kicad-local fab(確認で止まる。--force で外形とレジストのあ
 chk "kicad-local fab --name(zip の中のファイル名とガーバーの ProjectId が英字の名前)" "kicad-local fab now/fab/in.kicad_pcb --force --name brake -o now/fab/named.zip > /dev/null 2>&1; python3 -c \"import zipfile; z=zipfile.ZipFile('now/fab/named.zip'); n=z.namelist(); assert 'brake.drl' in n and all(x.startswith('brake') for x in n), n; g=[x for x in n if x.endswith('.gtl')][0]; assert b'%TF.ProjectId,brake,' in z.read(g)\""
 chk "kicad-cli の引数の誤りを最後にもう一度(標準エラー、終了コード 1)" "kicad-cli-local pcb export drill --no-such-option -o now/ in.kicad_pcb 2>&1 >/dev/null | tail -1 | grep -q '^Error: Unknown argument: --no-such-option'"
 
+# ksim のモデルの出どころ: 値の対応で別の品物(P6KE39A を 6.8V 品)・値が記号の名前・状態を決めていないスイッチは未確認
+chk "ksim: モデルの出どころと未確認(黙って代用しない)" "python3 tests/ksim_provenance_test.py $KICAD_LOCAL_HOME/tools/ksim | grep -q ok"
+
 # 終了コード: 配線の比較か道具の確認に NG が 1 つでもあれば 1（自動の試験が失敗を見逃さないように）
 if [ "$route_rc" -ne 0 ] || [ "$fails" -ne 0 ]; then
   echo "NG あり（配線の比較: $([ "$route_rc" -eq 0 ] && echo OK || echo NG)、道具の確認の NG: $fails 件）"
